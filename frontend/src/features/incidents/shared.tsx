@@ -14,7 +14,7 @@ export const STAGES: { status: string; label: string }[] = [
   { status: "APPROVED", label: "Approved" },
   { status: "EXECUTED", label: "Executed" },
 ];
-const TERMINAL_BAD = new Set(["REJECTED", "ESCALATED", "NO_SAFE_PLAN", "FAILED"]);
+const TERMINAL_BAD = new Set(["REJECTED", "ESCALATED", "NO_SAFE_PLAN", "FAILED", "DISMISSED"]);
 
 export function WorkflowStepper({ wf }: { wf: Workflow }) {
   const visited = new Set(wf.transitions.map((t) => t.to_status));
@@ -58,11 +58,24 @@ export function WorkflowStepper({ wf }: { wf: Workflow }) {
 
 const IMPACT_TONE = { high: "bad", medium: "warn", low: "neutral" } as const;
 
+export function SourceBadge({ source }: { source: string }) {
+  if (source === "demo_scenario") return <Badge tone="warn">simulated demo</Badge>;
+  if (source === "legacy") return <Badge>legacy</Badge>;
+  return <Badge tone="info">citizen</Badge>;
+}
+
+export const km = (m: number) => `${(m / 1000).toFixed(2)} km`;
+export const mins = (s: number) => `~${Math.max(1, Math.round(s / 60))} min`;
+
 export function describeAction(a: { action_type: string; params: Record<string, unknown>; target_id: string }, targetName?: string | null) {
   const p = a.params;
   switch (a.action_type) {
-    case "designate_evacuation_route":
-      return `Evacuate ${(p.node_path as string[]).join(" → ")} (${Math.round(p.length_m as number)} m)`;
+    case "designate_response_route":
+      return `${p.name}: ${km(p.length_m as number)}, ${mins(p.travel_s as number)} via ${(p.edge_path as string[]).length} road segments, to ${p.destination_label}`;
+    case "close_roads":
+      return `Close ${(p.segment_ids as string[]).length} road segment(s) within ${Math.round((p.radius_m as number) ?? 0)} m of ${targetName ?? a.target_id}`;
+    case "set_roads_caution":
+      return `Caution on ${(p.segment_ids as string[]).length} road segment(s) around ${targetName ?? a.target_id}`;
     case "transfer_signal_power":
       return `Move ${a.target_id} from ${p.from_feed} to ${p.to_feed}`;
     case "issue_public_advisory":
