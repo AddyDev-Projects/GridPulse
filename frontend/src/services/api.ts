@@ -108,7 +108,11 @@ export const api = {
   loadScenario: (key: string, createReport = true) =>
     post<SimulationState>(`/simulation/scenarios/${key}/load`, { create_report: createReport }),
   clearSimulation: () => post<SimulationState>("/simulation/clear"),
-  incidents: (scope: "current" | "all" = "current") => request<IncidentSummary[]>(`/incidents?scope=${scope}`),
+  // Resolved emergencies are excluded by the backend unless state=resolved|any is requested.
+  incidents: (scope: "current" | "all" = "current", state: "active" | "resolved" | "any" = "active") =>
+    request<IncidentSummary[]>(`/incidents?scope=${scope}&state=${state}`),
+  resolve: (id: string, note: string | undefined, expectedStatus: string) =>
+    post<Incident>(`/incidents/${id}/resolve`, { note: note || null, expected_status: expectedStatus }),
   incident: (id: string) => request<IncidentDetail>(`/incidents/${id}`),
   verify: (id: string, note?: string) => post<Incident>(`/incidents/${id}/verify`, { note: note || null }),
   dismiss: (id: string, reason: string) => post<Incident>(`/incidents/${id}/dismiss`, { reason }),

@@ -57,6 +57,18 @@ class ResponderRecommendation(BaseModel):
     confidence: float = Field(ge=0, le=1)
 
 
+class ServiceRequirement(BaseModel):
+    """Whether the report justifies a responder service. Only `required` services get a planned route."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    service: ResponderType
+    status: Literal["required", "optional", "not_needed"]
+    rationale: str = Field(max_length=400)
+    evidence: list[str] = Field(default_factory=list, max_length=8)
+    uncertainty: str | None = Field(default=None, max_length=300)
+
+
 class FacilityRecommendation(BaseModel):
     """A facility candidate based on the verified OSM location and a simulated route estimate."""
 
@@ -70,6 +82,12 @@ class FacilityRecommendation(BaseModel):
     capability_status: str = "unverified"
     availability_status: str = "unknown"
     rationale: str = Field(max_length=500)
+    kind: Literal["hospital", "police", "fire_station"] = "hospital"
+    service: ResponderType | None = None
+    lat: float | None = None
+    lon: float | None = None
+    rank: int | None = Field(default=None, description="1 = shortest estimated travel time on the road graph")
+    route_distance_m: float | None = Field(default=None, ge=0, description="Road-network distance of the estimate")
 
 
 class SentinelAssessment(BaseModel):

@@ -6,6 +6,7 @@ import pytest
 from alembic import command
 from alembic.autogenerate import compare_metadata
 from alembic.migration import MigrationContext
+from alembic.script import ScriptDirectory
 from fastapi.testclient import TestClient
 from sqlalchemy import func, select, text
 
@@ -292,7 +293,8 @@ def test_downgrade_refuses_rather_than_dropping_road_graph_routes(admin, pending
     with pytest.raises(RuntimeError, match="Cannot downgrade below 0002"):
         command.downgrade(alembic_config(), "0001")
     with migrated_db.connect() as conn:
-        assert conn.execute(text("select version_num from alembic_version")).scalar() == "0004"
+        head = ScriptDirectory.from_config(alembic_config()).get_current_head()
+        assert conn.execute(text("select version_num from alembic_version")).scalar() == head
         assert conn.execute(text("select count(*) from simulation_routes where city_id is not null")).scalar() > 0
 
 

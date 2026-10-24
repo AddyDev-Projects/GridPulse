@@ -15,7 +15,8 @@ export type IncidentStatus =
   | "ESCALATED"
   | "NO_SAFE_PLAN"
   | "FAILED"
-  | "DISMISSED";
+  | "DISMISSED"
+  | "RESOLVED";
 
 export type PlanStatus =
   | "DRAFT"
@@ -58,7 +59,6 @@ export interface PublicReportInput {
   lat: number;
   lon: number;
   location_description?: string;
-  observed_at?: string;
   indicators: string[];
   website?: string;
 }
@@ -240,6 +240,8 @@ export interface Incident {
   verification_note: string | null;
   dismissed_at: string | null;
   dismissal_reason: string | null;
+  resolved_at?: string | null;
+  resolution_note?: string | null;
   run_started_at: string | null;
   run_finished_at: string | null;
   created_at: string;
@@ -293,6 +295,72 @@ export interface FacilityRecommendation {
   capability_status: string;
   availability_status: string;
   rationale: string;
+  kind?: "hospital" | "police" | "fire_station";
+  service?: ResponderType | null;
+  lat?: number | null;
+  lon?: number | null;
+  rank?: number | null;
+  route_distance_m?: number | null;
+}
+
+export type ResponderType = "fire_rescue" | "ambulance" | "police";
+
+export interface ServiceRequirement {
+  service: ResponderType;
+  status: "required" | "optional" | "not_needed";
+  rationale: string;
+  evidence: string[];
+  uncertainty: string | null;
+}
+
+export interface TrafficRouteAssessment {
+  purpose: string;
+  service: ResponderType | null;
+  name: string;
+  status: "clear" | "caution" | "blocked";
+  data_source: string;
+  travel_time_basis: string;
+  length_m: number;
+  travel_s: number;
+  segments: number;
+  closed_segments: string[];
+  closed_by_this_plan: string[];
+  hazard_segments: string[];
+  caution_segments: string[];
+  alternative: { length_m: number; travel_s: number; extra_travel_s: number; overlap_pct: number; not_selected_reason?: string } | null;
+  alternative_note: string | null;
+  selection_reason?: string;
+  risks?: string[];
+  confidence?: string;
+}
+
+export interface TrafficAlternative {
+  purpose: string;
+  service: ResponderType | null;
+  name: string;
+  length_m: number;
+  travel_s: number;
+  extra_travel_s: number;
+  overlap_pct: number;
+  not_selected_reason?: string;
+  geometry?: LatLng[];
+}
+
+export interface TrafficAnalysis {
+  status?: "completed" | "failed";
+  data_source: string;
+  live_traffic: string;
+  freshness: string;
+  plan_version: number | null;
+  state_version: number | null;
+  route_assessments: TrafficRouteAssessment[];
+  traffic_management_recommendations: { action: string; status: string; detail: string; purpose?: string }[];
+  adjustments: { type: string; name?: string; detail?: string }[];
+  alternative_routes?: TrafficAlternative[];
+  evidence_sources?: { source: string; type: string; freshness: string }[];
+  affected_junctions?: string[];
+  conflicts: string[];
+  uncertainty: string[];
 }
 
 export interface Observation {
@@ -369,7 +437,9 @@ export interface IncidentDetail {
   legacy: boolean;
   verified_by: string | null;
   dismissed_by: string | null;
+  resolved_by?: string | null;
   hazard_geometry: LatLng[][];
+  services?: ServiceRequirement[];
 }
 
 export interface PlanAction {

@@ -22,7 +22,8 @@ from sqlalchemy.orm import Session
 from app.db.base import utcnow
 from app.models import Approval, Incident, Operator, ResponsePlan, SimulationExecution, SimulationRoute
 from app.services import audit
-from app.services.plans import action_specs, content_hash, incident_context, incident_traffic, latest_validation, store_validation
+from app.agents import traffic
+from app.services.plans import action_specs, content_hash, incident_context, latest_validation, store_validation
 from app.simulation.repository import get_meta, load_snapshot, persist_changes
 from app.simulation.state import apply_actions
 from app.validation.validator import validate_plan
@@ -50,6 +51,15 @@ def _incident(db: Session, plan: ResponsePlan) -> Incident:
         raise DecisionError(409, "legacy_read_only",
                             "This plan belongs to a legacy fictional-city incident and is kept read-only for history.")
     return inc
+
+
+def _fresh_traffic(snapshot, specs, evidence, plan_version: int) -> dict:
+    """Re-analyse traffic against the current state; a stored analysis may describe an older state."""
+    try:
+        return traffic.analyse_plan(snapshot, specs, evidence, plan_version=plan_version).as_dict()
+    except Exception as exc:  # noqa: BLE001 — validation still runs R1/R2 on the routes
+        log.exception("traffic re-analysis failed for plan v%s", plan_version)
+        return traffic.failed_context(type(exc).__name__, plan_version, snapshot.state_version)
 
 
 def _check_hash(plan: ResponsePlan, expected_hash: str, expected_version: int) -> None:
@@ -83,8 +93,7 @@ def approve(db: Session, plan_id: uuid.UUID, op: Operator, expected_hash: str, e
     if vrun is None or not vrun.passed:
         raise DecisionError(409, "not_validated", "Plan has no passing validation.")
     if vrun.state_version != meta.state_version:
-        reason = (f"City state changed (v{vrun.state_version} → v{meta.state_version}) since plan v{plan.version} "
-                  "was validated. Revalidate before approving.")
+        reason = "The city state has changed since this plan was generated. Revalidate the plan before approving or executing it."
         _mark_stale(db, plan, incident, reason)
         db.commit()
         raise DecisionError(409, "stale_plan", reason)
@@ -139,17 +148,19 @@ def revalidate(db: Session, plan_id: uuid.UUID, op: Operator) -> ResponsePlan:
     if plan.status not in ("STALE", "AWAITING_APPROVAL"):
         raise DecisionError(409, "invalid_state", f"Plan v{plan.version} is {plan.status}; it cannot be revalidated.")
     _, evidence = incident_context(db, incident.id)
-    traffic_context = incident_traffic(db, incident.id)
     snapshot = load_snapshot(db, meta)
-    result = validate_plan(action_specs(plan), snapshot, evidence, traffic=traffic_context)
+    specs = action_specs(plan)
+    result = validate_plan(specs, snapshot, evidence, traffic=_fresh_traffic(snapshot, specs, evidence, plan.version),
+                           plan_version=plan.version)
     store_validation(db, plan, result, meta.state_version, "revalidate")
     if result.passed:
         plan.status = "AWAITING_APPROVAL"
         plan.based_on_state_version = meta.state_version
-        audit.transition(db, incident, "AWAITING_APPROVAL", f"Plan v{plan.version} revalidated against state v{meta.state_version}")
+        audit.transition(db, incident, "AWAITING_APPROVAL", f"Plan v{plan.version} revalidated against the current city state")
         audit.record(db, "validation.completed",
-                     f"{operator} revalidated plan v{plan.version} against state v{meta.state_version}: passed. Fresh approval required.",
-                     incident_id=incident.id, plan_id=plan.id, actor=f"operator:{operator}", severity="success")
+                     f"{operator} revalidated plan v{plan.version} against the current city state: passed. Fresh approval required.",
+                     incident_id=incident.id, plan_id=plan.id, actor=f"operator:{operator}", severity="success",
+                     details={"state_version": meta.state_version})
     else:
         plan.status = "INVALID"
         audit.transition(db, incident, "ESCALATED", f"Plan v{plan.version} is no longer valid against the current state")
@@ -193,17 +204,16 @@ def execute(db: Session, plan_id: uuid.UUID, op: Operator) -> SimulationExecutio
         appr.invalidated_reason = "Plan content differs from what was approved"
         raise _blocked(db, plan, "approval_mismatch", "The approval does not cover this exact plan content.")
     if appr.state_version != meta.state_version:
-        reason = (f"City state changed (v{appr.state_version} → v{meta.state_version}) after approval; "
-                  "the approval no longer applies. Revalidate and approve again.")
+        reason = ("The city state has changed since this plan was approved, so the approval no longer applies. "
+                  "Revalidate the plan, then approve it again before executing.")
         _mark_stale(db, plan, incident, reason)
         raise _blocked(db, plan, "stale_approval", reason)
 
     # Fresh deterministic validation immediately before mutating anything.
     _, evidence = incident_context(db, incident.id)
-    traffic_context = incident_traffic(db, incident.id)
     snapshot = load_snapshot(db, meta)
     result = validate_plan(specs, snapshot, evidence, expected_state_version=appr.state_version,
-                           traffic=traffic_context)
+                           traffic=_fresh_traffic(snapshot, specs, evidence, plan.version), plan_version=plan.version)
     store_validation(db, plan, result, meta.state_version, "pre_execution")
     if not result.passed:
         appr.status = "invalidated"
@@ -254,10 +264,9 @@ def execute(db: Session, plan_id: uuid.UUID, op: Operator) -> SimulationExecutio
         incident.run_finished_at = utcnow()
         audit.transition(db, incident, "EXECUTED", f"Plan v{plan.version} applied to the simulation")
         audit.record(db, "execution.succeeded",
-                     f"Plan v{plan.version} executed in simulation: {len(changes)} state change(s); "
-                     f"city state v{before} → v{meta.state_version}.",
+                     f"Plan v{plan.version} executed in the simulation: {len(changes)} simulated state change(s).",
                      incident_id=incident.id, plan_id=plan.id, actor=f"operator:{operator}", severity="success",
-                     details={"changes": changes})
+                     details={"changes": changes, "state_version_before": before, "state_version_after": meta.state_version})
         db.commit()
     except IntegrityError as exc:
         db.rollback()
@@ -270,3 +279,59 @@ def execute(db: Session, plan_id: uuid.UUID, op: Operator) -> SimulationExecutio
         db.commit()
         raise
     return execution
+
+
+# Plans that may still be decided or executed; resolving the incident withdraws them.
+OPEN_PLAN_STATUSES = ("DRAFT", "REVISION_REQUIRED", "AWAITING_APPROVAL", "APPROVED", "STALE")
+
+
+def resolve(db: Session, incident_id: uuid.UUID, op: Operator, note: str | None,
+            expected_status: str | None = None) -> Incident:
+    """Close a finished emergency. Keeps the record, its plans and audit; never executes anything.
+
+    Open plans are withdrawn (INVALID) and their active approvals invalidated, so nothing can run
+    for a resolved incident. Its designated response routes stop being active. Road closures and the
+    simulated power state are city state, not the incident's: they stay until an operator lifts them.
+    """
+    inc = db.scalars(select(Incident).where(Incident.id == incident_id).with_for_update()).first()
+    if inc is None:
+        raise DecisionError(404, "incident_not_found", "Incident not found.")
+    if inc.city_id is None:
+        raise DecisionError(409, "legacy_read_only", "Legacy incidents are kept read-only for history.")
+    if inc.status == "RESOLVED":
+        # Idempotent: a repeated request (double click, retry) returns the record unchanged, with no new
+        # transition or audit event.
+        db.rollback()
+        return inc
+    if inc.status == "DISMISSED":
+        raise DecisionError(409, "invalid_state", "Dismissed reports are already closed.")
+    if inc.run_started_at is not None and inc.run_finished_at is None:
+        raise DecisionError(409, "workflow_running", "The agents are still working on this incident; wait for them to finish.")
+    if expected_status is not None and expected_status != inc.status:
+        raise DecisionError(409, "stale_state", f"The incident changed to {inc.status} since you loaded it. Review it again.")
+
+    withdrawn = []
+    for plan in db.scalars(select(ResponsePlan).where(ResponsePlan.incident_id == inc.id,
+                                                      ResponsePlan.status.in_(OPEN_PLAN_STATUSES)).with_for_update()):
+        for appr in db.scalars(select(Approval).where(Approval.plan_id == plan.id, Approval.status == "active")):
+            appr.status = "invalidated"
+            appr.invalidated_reason = "Incident resolved"
+        plan.status = "INVALID"
+        withdrawn.append(plan.version)
+    plan_ids = select(ResponsePlan.id).where(ResponsePlan.incident_id == inc.id)
+    routes = db.query(SimulationRoute).filter(SimulationRoute.plan_id.in_(plan_ids), SimulationRoute.active.is_(True)) \
+        .update({"active": False}, synchronize_session=False)
+
+    inc.resolved_at, inc.resolved_by_id, inc.resolution_note = utcnow(), op.id, note
+    previous = inc.status
+    audit.transition(db, inc, "RESOLVED", f"Resolved by {op.username}")
+    audit.record(db, "incident.resolved",
+                 f"{op.username} resolved the emergency (was {previous})."
+                 + (f" Withdrew unexecuted plan(s) v{', v'.join(map(str, withdrawn))}." if withdrawn else "")
+                 + (f" {routes} response route(s) no longer active." if routes else ""),
+                 incident_id=inc.id, actor=f"operator:{op.username}", severity="success",
+                 details={"note": note, "previous_status": previous, "withdrawn_plan_versions": withdrawn,
+                          "routes_deactivated": routes,
+                          "closures": "Simulated road closures and power state are unchanged; lift them separately."})
+    db.commit()
+    return inc

@@ -1,10 +1,10 @@
 import { useState } from "react";
 import { ArrowRight, CheckCircle, XCircle, GitBranch } from "@phosphor-icons/react";
 import { useIncidentContext } from "./IncidentLayout";
-import { ActionRow, FindingCard, km, mins } from "./shared";
+import { ActionRow, FindingCard, km, mins, relevantFacilities, trafficFor } from "./shared";
 import { useCity, useOverlay } from "../../hooks/queries";
 import { AGENT_LABEL, Badge, Empty, Panel, Skeleton, StatusBadge, TextLink, cx, humanize } from "../../components/ui";
-import { COLORS, CityMap, MapLegend, type MapMarker, type MapRoute } from "../map/CityMap";
+import { COLORS, CityMap, MapLegend, SERVICE_LEGEND, routeTone, type MapMarker, type MapRoute } from "../map/CityMap";
 import type { Closure, LatLng, Plan, Revision } from "../../types/api";
 
 const routesOf = (p: Plan) => p.actions.filter((a) => a.action_type === "designate_response_route");
@@ -24,7 +24,7 @@ function PlanColumn({ plan, title, revision, side }: { plan: Plan; title: string
           v?.passed ? "bg-ok/[0.07] text-ok ring-1 ring-inset ring-ok/20" : "bg-bad/[0.07] text-bad ring-1 ring-inset ring-bad/25")}>
           {v?.passed ? <CheckCircle size={17} weight="fill" /> : <XCircle size={17} weight="fill" />}
           {v ? (v.passed ? "Passed validation" : `Blocked: ${v.blocking_count} blocking finding${v.blocking_count === 1 ? "" : "s"}`) : "Not validated"}
-          {v && <span className="ml-auto text-xs text-fog-500">{v.warning_count} warnings · state v{v.state_version}</span>}
+          {v && <span className="ml-auto text-xs text-fog-500">{v.warning_count} {v.warning_count === 1 ? "warning" : "warnings"}</span>}
         </div>
         <div>
           <h3 className="mb-2 text-xs text-fog-500">Proposed actions</h3>
@@ -97,12 +97,15 @@ function RevisionCard({ r }: { r: Revision }) {
 }
 
 function CoordinationComparison({ first, final }: { first: Plan; final: Plan }) {
-  const a1 = routesOf(first).find((a) => a.params.purpose === "emergency_access");
-  const af = routesOf(final).find((a) => a.params.purpose === "emergency_access");
+  // Compare the primary responder route: fire & rescue access if planned, otherwise police response.
+  const primary = (p: Plan) => routesOf(p).find((a) => a.params.purpose === "emergency_access")
+    ?? routesOf(p).find((a) => a.params.purpose === "police_response");
+  const a1 = primary(first);
+  const af = primary(final);
   const conflict = first.latest_validation?.findings.find((f) => f.severity === "blocking");
   const rows: [string, string, string][] = [
     ["Blocking safety findings", String(first.latest_validation?.blocking_count ?? 0), String(final.latest_validation?.blocking_count ?? 0)],
-    ["Emergency access route", a1 ? `${km(a1.params.length_m as number)}, ${mins(a1.params.travel_s as number)}` : "none",
+    [a1?.params.purpose === "police_response" || af?.params.purpose === "police_response" ? "Police response route" : "Fire & rescue access route", a1 ? `${km(a1.params.length_m as number)}, ${mins(a1.params.travel_s as number)}` : "none",
       af ? `${km(af.params.length_m as number)}, ${mins(af.params.travel_s as number)}` : "none"],
     ["Outcome", "Blocked by the validator, never executed", humanize(final.status)],
   ];
@@ -141,8 +144,12 @@ function PlanMap({ before, after }: { before: Plan | null; after: Plan }) {
   const routes: MapRoute[] = [];
   if (blocked) routesOf(blocked).forEach((a) => a.geometry && routes.push({ id: `b${a.seq}`, geometry: a.geometry, tone: "conflict", label: `v${blocked.version}: ${a.params.name as string} (blocked)` }));
   if (after !== blocked) routesOf(after).forEach((a) => a.geometry && routes.push({
-    id: `a${a.seq}`, geometry: a.geometry, tone: a.params.purpose === "medical_transfer" ? "routeAlt" : "route",
+    id: `a${a.seq}`, geometry: a.geometry, tone: routeTone(a.params.purpose as string),
     label: `v${after.version}: ${a.params.name as string}` }));
+  // Alternatives AnalyseTraffic evaluated for this exact plan version but did not select.
+  (trafficFor(detail, after.version)?.alternative_routes ?? []).forEach((alt, i) => alt.geometry && routes.push({
+    id: `alt${i}`, geometry: alt.geometry, tone: routeTone(alt.purpose), alternative: true,
+    label: `${alt.name} (not selected): ${alt.not_selected_reason ?? ""}` }));
   const closures: Closure[] = after.actions.filter((a) => a.action_type === "close_roads" || a.action_type === "set_roads_caution")
     .flatMap((a) => (a.segments_geometry ?? []).map((g, i) => ({
       segment_id: `${a.seq}-${i}`, name: a.target_name ?? "Road segment", kind: a.action_type === "close_roads" ? "closed" as const : "caution" as const,
@@ -157,12 +164,12 @@ function PlanMap({ before, after }: { before: Plan | null; after: Plan }) {
   return (
     <div className="grid gap-3">
       <CityMap city={city.data} className="h-[460px]" routes={routes} closures={closures} hazard={detail?.hazard_geometry ?? []}
-        signals={signals} pois={overlay.data?.pois.filter((p) => p.kind !== "police") ?? []} markers={markers}
+        signals={signals} pois={relevantFacilities(detail)} markers={markers}
         focus={focus.length ? focus : inc?.lat != null ? [[inc.lat, inc.lon!]] : null} />
       <MapLegend items={[
-        { color: COLORS.conflict, label: "Blocked route (plan before revision)", dashed: true },
-        { color: COLORS.route, label: "Validated emergency access route" },
-        { color: COLORS.routeAlt, label: "Medical transfer route" },
+        ...SERVICE_LEGEND,
+        { color: COLORS.fog, label: "Alternative (not selected)", dash: "4 8" },
+        { color: COLORS.conflict, label: "Blocked route (plan before revision)", dash: "6 10" },
         { color: COLORS.closed, label: "Closures in this plan", dashed: true },
         { color: COLORS.hazard, label: "Modelled hazard area" },
         { color: COLORS.signalOk, label: "OSM traffic signal (simulated power)", dot: true },

@@ -281,3 +281,21 @@ body {
   color: var(--color-fog-100);
   border-color: rgb(255 255 255 / 0.1);
 }
+
+/* Facility markers (Leaflet divIcon): service colour + letter, so kind never rests on colour alone. */
+.gp-poi-icon { background: none; border: 0; }
+.gp-poi {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  border-radius: 999px;
+  font: 700 10px/1 ui-sans-serif, system-ui, sans-serif;
+  color: #07060b;
+  box-shadow: 0 0 0 1.5px #07060b, 0 1px 4px rgb(0 0 0 / 0.5);
+}
+.gp-poi-police { background: #a78bfa; border-radius: 4px; }
+.gp-poi-fire_station { background: #22d3ee; border-radius: 4px; }
+.gp-poi-hospital { background: #f8fafc; font-size: 9px; }
+.gp-ml-popup .maplibregl-popup-content { background: #161320; color: #e8e5f2; font-size: 12px; padding: 6px 8px; border-radius: 8px; }
+.gp-ml-popup .maplibregl-popup-tip { display: none; }

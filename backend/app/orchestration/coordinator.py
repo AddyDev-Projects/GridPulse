@@ -20,6 +20,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.agents import grid, mobility, sentinel, traffic
+from app.agents.services import ROUTE_PURPOSE, ServicePlan, select_services
 from app.agents.evidence import assess_evidence, fetch_observations, relevant_sensors
 from app.agents.geo_context import incident_geo
 from app.core.config import get_settings
@@ -36,6 +37,8 @@ from app.simulation.state import ActionSpec, CitySnapshot
 from app.validation.validator import Finding, validate_plan
 
 log = logging.getLogger("gridpulse.coordinator")
+# A required responder that cannot reach the incident at all means there is no safe plan.
+BASE_ROUTES = {ROUTE_PURPOSE["fire_rescue"], ROUTE_PURPOSE["police"]}
 
 
 class Coordinator:
@@ -115,6 +118,18 @@ class Coordinator:
                      details={"category": a.category, "reported_category": reported_category, "urgency": a.urgency,
                               "fallback_used": outcome.fallback_used})
         self._transition("TRIAGED", a.summary)
+
+        # Which responder services the report justifies. Recomputed on every run; never reused from an
+        # earlier plan. Only "required" services get routes (app.agents.services).
+        s_run = self._run("coordinator", "select_services", "deterministic",
+                          {"reported_category": reported_category, "indicators": indicators,
+                           "sentinel_recommendations": [r.responder_type for r in a.responder_recommendations]})
+        services = select_services(reported_category, indicators, a)
+        self._finish(s_run, {"services": services.as_list()})
+        audit.record(self.db, "services.selected",
+                     "Services: " + "; ".join(f"{d.service.replace('_', ' ')} {d.status.replace('_', ' ')}"
+                                              for d in services.decisions) + ".",
+                     incident_id=inc.id, actor="agent:coordinator", details={"services": services.as_list()})
         self._commit()
 
         # 2. Geography + evidence (deterministic). The citizen's category drives the hazard model;
@@ -152,29 +167,11 @@ class Coordinator:
         m_run = self._run("mobility", "propose", "deterministic",
                           {"segment_id": geo.segment_id, "hazard_segments": len(geo.hazard_segment_ids),
                            "radius_m": geo.hazard_radius_m})
-        mp = mobility.propose(snapshot, a, evidence, geo, indicators)
+        mp = mobility.propose(snapshot, a, evidence, geo, indicators, services=services)
         self._finish(m_run, mp.as_dict())
         m_prop = self._proposal(m_run, "mobility", mp.summary, mp.as_dict())
         audit.record(self.db, "mobility.proposal", f"Mobility proposed: {mp.summary}", incident_id=inc.id,
                      actor="agent:mobility", details={"actions": [x.action_type for x in mp.actions], "failed": mp.failed})
-
-        t_run = self._run("traffic", "analyse", "deterministic",
-                          {"segment_id": geo.segment_id, "hazard_segments": geo.hazard_segment_ids,
-                           "mobility_routes": [r.purpose for r in mp.routes],
-                           "live_traffic_configured": False})
-        tp = traffic.analyse(snapshot, a, evidence, geo, mp)
-        self._finish(t_run, tp.as_dict())
-        t_prop = self._proposal(t_run, "traffic", tp.summary, tp.as_dict())
-        audit.record(
-            self.db,
-            "traffic.analysis",
-            f"AnalyseTraffic: {tp.summary}",
-            incident_id=inc.id,
-            actor="agent:traffic",
-            severity="warning" if tp.live_traffic == "unavailable" else "info",
-            details={"data_source": tp.data_source, "freshness": tp.freshness, "conflicts": tp.conflicts,
-                     "recommendations": tp.traffic_management_recommendations},
-        )
 
         g_run = self._run("grid", "propose", "deterministic", {"infrastructure_hazards": [h.target_id for h in evidence.infrastructure_hazards]})
         gp = grid.propose(snapshot, evidence)
@@ -190,42 +187,91 @@ class Coordinator:
                 "dispatch_field_verification", geo.segment_id or "",
                 {"question": "Assess the reported situation on site; no automated action applies."},
                 "No closure, route or utility action applies to this report category."), "sentinel")]) if geo.segment_id else []
+        # AnalyseTraffic may change the draft (reroute around caution, diversion notice) before validation.
+        actions, adjustments = self._traffic_adjust(actions, snapshot, evidence, reported_category)
         plan = create_plan(self.db, inc.id, 1, actions, state_version=snapshot.state_version,
                            summary=self._summarize(actions, snapshot),
-                           rationale=("Initial plan assembled from independent Mobility, AnalyseTraffic and Grid/Utility "
-                                      "proposals. " + tp.summary + " Traffic-management guidance is simulated and does not "
-                                      "change real roads or signals."),
-                           proposal_ids={"mobility": m_prop.id, "traffic": t_prop.id, "grid": g_prop.id})
+                           rationale=("Initial plan assembled from independent Mobility and Grid/Utility proposals, "
+                                      "adjusted by AnalyseTraffic. Live traffic unavailable: travel times are free-flow "
+                                      "estimates. Traffic-management guidance is simulated and does not change real "
+                                      "roads or signals."),
+                           proposal_ids={"mobility": m_prop.id, "grid": g_prop.id})
         audit.record(self.db, "plan.created", f"Plan v1 assembled with {len(actions)} actions.", incident_id=inc.id,
-                     plan_id=plan.id, actor="agent:coordinator")
+                     plan_id=plan.id, actor="agent:coordinator", details={"traffic_adjustments": adjustments})
         self._transition("PLANS_PROPOSED", f"Plan v1 with {len(actions)} actions")
         self._commit()
 
-        if "emergency_access" in mp.failed:
-            vrun = store_validation(self.db, plan, validate_plan(actions, snapshot, evidence, traffic=tp.as_dict()),
+        ctx = self._traffic_analysis(plan, actions, snapshot, evidence, adjustments, 0)
+        missing = [p for p in mp.failed if p in BASE_ROUTES]
+        if missing:
+            vrun = store_validation(self.db, plan, validate_plan(actions, snapshot, evidence, traffic=ctx,
+                                                                 plan_version=plan.version),
                                     snapshot.state_version, "initial")
             self._escalate(plan, vrun, "NO_SAFE_PLAN",
-                           "Mobility found no feasible emergency-access route on the road graph: " + " ".join(mp.reasoning[-2:]),
+                           "Mobility found no feasible route for a required responder on the road graph: "
+                           + " ".join(mp.reasoning[-2:]),
                            [{"strategy": "mobility_route", "agent": "mobility", "viable": False,
                              "detail": "; ".join(mp.reasoning)}])
             return
         if not geo.in_coverage or geo.segment_id is None:
-            vrun = store_validation(self.db, plan, validate_plan(actions, snapshot, evidence, traffic=tp.as_dict()),
+            vrun = store_validation(self.db, plan, validate_plan(actions, snapshot, evidence, traffic=ctx,
+                                                                 plan_version=plan.version),
                                     snapshot.state_version, "initial")
             self._escalate(plan, vrun, "ESCALATED", "The report is outside the mapped coverage area or not near a road; "
                                                     "it needs manual handling.", [])
             return
 
-        self._validate_loop(plan, actions, snapshot, a, evidence, geo, indicators, tp.as_dict())
+        self._validate_loop(plan, actions, snapshot, a, evidence, geo, indicators, services, reported_category, ctx)
+
+    # ---- traffic -----------------------------------------------------------------------------
+    def _traffic_adjust(self, actions: list[ActionSpec], snapshot: CitySnapshot, evidence, category: str
+                        ) -> tuple[list[ActionSpec], list[dict[str, Any]]]:
+        try:
+            adjusted, changes = traffic.adjust_plan(snapshot, actions, evidence, category)
+        except Exception as exc:  # noqa: BLE001 — a traffic failure must not corrupt or block the plan
+            log.exception("traffic adjustment failed for incident %s", self.incident.id)
+            audit.record(self.db, "traffic.failed", f"AnalyseTraffic could not adjust the plan ({type(exc).__name__}); "
+                         "the draft is unchanged.", incident_id=self.incident.id, actor="agent:traffic", severity="warning")
+            return actions, []
+        return resequence(adjusted), changes
+
+    def _traffic_analysis(self, plan: ResponsePlan, actions: list[ActionSpec], snapshot: CitySnapshot, evidence,
+                          adjustments: list[dict[str, Any]], revision: int) -> dict[str, Any]:
+        """Analyse this exact plan version; the result is stamped with the plan and state version it describes."""
+        run = self._run("traffic", "analyse", "deterministic",
+                        {"plan_version": plan.version, "state_version": snapshot.state_version,
+                         "routes": [a.params["purpose"] for a in actions if a.action_type == "designate_response_route"],
+                         "live_traffic_configured": False}, revision)
+        try:
+            tp = traffic.analyse_plan(snapshot, actions, evidence, plan_version=plan.version, adjustments=adjustments)
+        except Exception as exc:  # noqa: BLE001
+            log.exception("traffic analysis failed for incident %s", self.incident.id)
+            run.status, run.error, run.finished_at = "failed", type(exc).__name__, utcnow()
+            audit.record(self.db, "traffic.failed", f"AnalyseTraffic failed on plan v{plan.version} ({type(exc).__name__}); "
+                         "validation continues without it.", incident_id=self.incident.id, plan_id=plan.id,
+                         actor="agent:traffic", severity="warning")
+            return traffic.failed_context(type(exc).__name__, plan.version, snapshot.state_version)
+        out = tp.as_dict()
+        self._finish(run, out)
+        self._proposal(run, "traffic", tp.summary, out, revision)
+        audit.record(self.db, "traffic.analysis", f"AnalyseTraffic (plan v{plan.version}): {tp.summary}",
+                     incident_id=self.incident.id, plan_id=plan.id, actor="agent:traffic",
+                     severity="warning" if tp.conflicts else "info",
+                     details={"plan_version": plan.version, "state_version": snapshot.state_version,
+                              "conflicts": tp.conflicts, "adjustments": tp.adjustments,
+                              "recommendations": tp.traffic_management_recommendations})
+        self._commit()  # visible to the operator while validation runs
+        return out
 
     def _validate_loop(self, plan: ResponsePlan, actions: list[ActionSpec], snapshot: CitySnapshot,
-                       assessment, evidence, geo, indicators, traffic_context: dict[str, Any] | None = None) -> None:
+                       assessment, evidence, geo, indicators, services: ServicePlan, category: str,
+                       traffic_context: dict[str, Any]) -> None:
         inc = self.incident
         max_rev = self.settings.max_revisions
         revision = 0
         while True:
             self._transition("VALIDATING" if revision == 0 else "VALIDATING_AGAIN", f"Validating plan v{plan.version}")
-            result = validate_plan(actions, snapshot, evidence, traffic=traffic_context)
+            result = validate_plan(actions, snapshot, evidence, traffic=traffic_context, plan_version=plan.version)
             vrun = store_validation(self.db, plan, result, snapshot.state_version, "initial" if revision == 0 else "revision")
             for f in result.blocking():
                 audit.record(self.db, "validation.finding", f"[{f.rule_id}] {f.title}", incident_id=inc.id,
@@ -253,7 +299,8 @@ class Coordinator:
             self._commit()
 
             revision += 1
-            outcome = revise(actions, result, snapshot, assessment, evidence, geo, indicators)
+            outcome = revise(actions, result, snapshot, assessment, evidence, geo, indicators, services=services,
+                             category=category)
             for c in outcome.contributions:
                 r = self._run(c.agent, c.step, "deterministic", c.input, revision)
                 self._finish(r, c.output)
@@ -262,11 +309,13 @@ class Coordinator:
                 self._escalate(plan, vrun, "NO_SAFE_PLAN", outcome.reason, outcome.alternatives)
                 return
 
-            new_plan = create_plan(self.db, inc.id, plan.version + 1, outcome.actions,
+            # The revised routes are new, so traffic adjusts and analyses them again; nothing is reused.
+            new_actions, adjustments = self._traffic_adjust(outcome.actions, snapshot, evidence, category)
+            new_plan = create_plan(self.db, inc.id, plan.version + 1, new_actions,
                                    state_version=snapshot.state_version,
-                                   summary=self._summarize(outcome.actions, snapshot), rationale=outcome.rationale,
+                                   summary=self._summarize(new_actions, snapshot), rationale=outcome.rationale,
                                    parent_plan_id=plan.id)
-            diff = diff_actions(actions, outcome.actions)
+            diff = diff_actions(actions, new_actions)
             self.db.add(PlanRevision(incident_id=inc.id, from_plan_id=plan.id, to_plan_id=new_plan.id,
                                      revision_number=revision, strategy=outcome.strategy,
                                      triggered_by=outcome.triggered_by, alternatives=outcome.alternatives,
@@ -274,9 +323,11 @@ class Coordinator:
             plan.status = "SUPERSEDED"
             audit.record(self.db, "plan.revised", f"Plan v{plan.version} → v{new_plan.version}: {outcome.rationale}",
                          incident_id=inc.id, plan_id=new_plan.id, actor="agent:coordinator",
-                         details={"strategy": outcome.strategy, "alternatives": outcome.alternatives})
+                         details={"strategy": outcome.strategy, "alternatives": outcome.alternatives,
+                                  "traffic_adjustments": adjustments})
             self._commit()
-            plan, actions = new_plan, outcome.actions
+            plan, actions = new_plan, new_actions
+            traffic_context = self._traffic_analysis(plan, actions, snapshot, evidence, adjustments, revision)
 
     def _escalate(self, plan: ResponsePlan, vrun, status: str, reason: str, alternatives: list[dict]) -> None:
         append_finding(self.db, vrun, Finding(

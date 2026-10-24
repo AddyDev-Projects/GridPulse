@@ -1,9 +1,10 @@
 import { Quotes, Robot, Eye, Question, Lightbulb, Cpu } from "@phosphor-icons/react";
 import { useIncidentContext } from "./IncidentLayout";
-import { AGENT_LABEL, Badge, Empty, LoadingBlock, Panel, SimTag, Skeleton, StatusBadge, clock, cx, humanize } from "../../components/ui";
+import { AGENT_LABEL, Badge, Empty, LoadingBlock, Panel, SimTag, Skeleton, StatusBadge, clock, cx, humanize, when } from "../../components/ui";
 import { useCity, useOverlay } from "../../hooks/queries";
 import { COLORS, CityMap, MapLegend } from "../map/CityMap";
-import type { AgentRun, FacilityRecommendation, Proposal, ResponderRecommendation } from "../../types/api";
+import type { AgentRun, FacilityRecommendation, Proposal, ResponderRecommendation, ServiceRequirement, TrafficAnalysis } from "../../types/api";
+import { km, mins, relevantFacilities } from "./shared";
 
 function ListBlock({ icon, title, items, tone, hint }: { icon: React.ReactNode; title: string; items: string[]; tone: string; hint: string }) {
   return (
@@ -54,19 +55,104 @@ function ProposalCard({ p }: { p: Proposal }) {
         <p key={u} className="mt-2 text-xs text-warn">{u}</p>
       ))}
       {traffic && (
-        <div className="mt-3 grid gap-2 rounded-lg bg-volt-400/[0.05] p-3 text-xs ring-1 ring-inset ring-volt-400/15">
-          <p className="text-fog-300">
-            Data source: <span className="text-fog-100">{String(traffic.data_source ?? "estimated")}</span> · live traffic: <span className="text-warn">{String(traffic.live_traffic ?? "unavailable")}</span> · freshness: {String(traffic.freshness ?? "unknown")}
-          </p>
-          {(traffic.traffic_management_recommendations as { action: string; detail: string; status: string }[] | undefined)?.map((r) => (
-            <p key={`${r.action}${r.detail}`} className="text-fog-400">{humanize(r.action)}: {r.detail} <span className="text-fog-500">({humanize(r.status)})</span></p>
-          ))}
-          {(traffic.alternative_routes as { name: string; length_m: number; travel_s: number }[] | undefined)?.length ? (
-            <p className="text-fog-400">Alternative route estimates available: {(traffic.alternative_routes as { name: string }[]).map((r) => r.name).join(", ")}.</p>
-          ) : null}
-        </div>
+        <p className="mt-2 text-xs text-fog-500">
+          Analysis of plan v{String(traffic.plan_version ?? "?")} · live traffic {String(traffic.live_traffic ?? "unavailable")}
+        </p>
       )}
     </li>
+  );
+}
+
+const SERVICE_LABEL: Record<string, string> = { fire_rescue: "Fire & rescue", ambulance: "Ambulance / medical", police: "Police" };
+const SERVICE_TONE = { required: "accent", optional: "warn", not_needed: "neutral" } as const;
+
+function ServicesPanel({ services }: { services: ServiceRequirement[] }) {
+  return (
+    <Panel title="Response services">
+      <ul className="grid gap-2.5">
+        {services.map((s) => (
+          <li key={s.service} className={cx("rounded-xl border p-3.5", s.status === "not_needed" ? "border-white/[0.05]" : "border-white/[0.08] bg-white/[0.02]")}>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className={cx("text-sm font-medium", s.status === "not_needed" ? "text-fog-400" : "text-fog-100")}>{SERVICE_LABEL[s.service] ?? humanize(s.service)}</span>
+              <Badge tone={SERVICE_TONE[s.status]}>{s.status === "not_needed" ? "not needed" : s.status}</Badge>
+            </div>
+            <p className="mt-1.5 text-[13px] leading-relaxed text-fog-300">{s.rationale}</p>
+            {s.evidence.length > 0 && <p className="mt-1 text-xs text-fog-500">Basis: {s.evidence.join("; ")}</p>}
+            {s.uncertainty && <p className="mt-1 text-xs text-warn">{s.uncertainty}</p>}
+          </li>
+        ))}
+      </ul>
+      <p className="mt-3 text-xs text-fog-500">
+        Only required services get a route in the plan; it still needs evidence and your approval. Optional services are listed for
+        review only. A station on the map is not an available unit, and nothing is dispatched in the real world.
+      </p>
+    </Panel>
+  );
+}
+
+const ROUTE_STATUS_TONE = { clear: "ok", caution: "warn", blocked: "bad" } as const;
+
+function TrafficPanel({ t }: { t: TrafficAnalysis | null }) {
+  if (!t) return null;
+  return (
+    <Panel title="Traffic analysis" action={<Badge tone="warn">no live traffic</Badge>}>
+      <p className="text-xs text-fog-500">
+        Analysis of plan v{t.plan_version ?? "?"}. Travel times are free-flow estimates from the OpenStreetMap road graph and the
+        simulated road state, not observed traffic.
+      </p>
+      {t.status === "failed" ? (
+        <p className="mt-3 text-sm text-warn">The traffic analysis failed for this plan; routes were still validated against closures and power dependencies.</p>
+      ) : t.route_assessments.length === 0 ? (
+        <p className="mt-3 text-sm text-fog-400">This plan has no response routes to assess.</p>
+      ) : (
+        <ul className="mt-3 grid gap-2.5">
+          {t.route_assessments.map((r) => (
+            <li key={r.purpose} className="rounded-xl border border-white/[0.07] bg-white/[0.02] p-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-sm text-fog-100">{r.name}</span>
+                <Badge tone="accent">recommended</Badge>
+                <Badge tone={ROUTE_STATUS_TONE[r.status]}>{r.status}</Badge>
+              </div>
+              {r.selection_reason && <p className="mt-1 text-xs text-fog-400">{r.selection_reason}</p>}
+              <p className="mt-1 font-mono text-xs text-fog-400">
+                {km(r.length_m)} · {mins(r.travel_s)} · {r.segments} segments
+                {r.caution_segments.length ? ` · ${r.caution_segments.length} caution` : ""}
+                {r.closed_segments.length ? ` · ${r.closed_segments.length} closed` : ""}
+              </p>
+              <p className="mt-1 text-xs text-fog-500">
+                {r.alternative
+                  ? `Alternative: ${km(r.alternative.length_m)}, ${mins(r.alternative.travel_s)} (${r.alternative.extra_travel_s >= 0 ? "+" : ""}${Math.round(r.alternative.extra_travel_s / 60)} min, ${r.alternative.overlap_pct}% shared). ${r.alternative.not_selected_reason ?? ""}`
+                  : r.alternative_note}
+              </p>
+              {(r.risks ?? []).length > 0 && (
+                <ul className="mt-1.5 grid gap-0.5 text-xs text-warn">
+                  {r.risks!.slice(0, 4).map((x) => <li key={x}>{x}</li>)}
+                </ul>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+      {(t.evidence_sources ?? []).length > 0 && (
+        <details className="mt-3 text-xs text-fog-400">
+          <summary className="cursor-pointer text-fog-300">Evidence sources and freshness</summary>
+          <ul className="mt-1.5 grid gap-1">
+            {t.evidence_sources!.map((s) => (
+              <li key={s.source}><span className="text-fog-200">{s.source}</span> · {s.type} · {/^\d{4}-\d\d-\d\dT/.test(s.freshness) ? new Date(s.freshness).toLocaleString() : s.freshness}</li>
+            ))}
+          </ul>
+        </details>
+      )}
+      {t.traffic_management_recommendations.length > 0 && (
+        <ul className="mt-3 grid gap-1 text-xs text-fog-400">
+          {t.traffic_management_recommendations.map((r, i) => (
+            <li key={`${r.action}-${i}`}>
+              <span className="text-fog-200">{humanize(r.action)}</span>: {r.detail} <span className="text-fog-500">({humanize(r.status)})</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Panel>
   );
 }
 
@@ -95,13 +181,14 @@ function ResponderPanel({ recommendations }: { recommendations: ResponderRecomme
 
 function FacilityPanel({ recommendations }: { recommendations: FacilityRecommendation[] }) {
   return (
-    <Panel title="Medical facility assessment">
-      {recommendations.length === 0 ? <Empty title="No reachable hospital estimate" /> : (
+    <Panel title="Facility candidates">
+      {recommendations.length === 0 ? <Empty title="No reachable facility estimate" /> : (
         <ul className="grid gap-3">
           {recommendations.map((f) => (
             <li key={f.facility_id} className="rounded-xl border border-white/[0.07] bg-white/[0.02] p-3.5">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="text-sm font-medium text-fog-100">{f.name}</span>
+                <Badge>{f.kind === "police" ? "police station" : f.kind === "fire_station" ? "fire station" : "hospital"}</Badge>
                 <Badge tone="info">{(f.distance_m / 1000).toFixed(2)} km straight-line</Badge>
                 <Badge>{Math.max(1, Math.round(f.travel_s / 60))} min estimate</Badge>
               </div>
@@ -111,7 +198,7 @@ function FacilityPanel({ recommendations }: { recommendations: FacilityRecommend
           ))}
         </ul>
       )}
-      <p className="mt-3 text-xs text-fog-500">GridPulse does not contact or reserve a facility. Capacity, specialist services, emergency-department status, and acceptance remain unknown unless a verified source is connected.</p>
+      <p className="mt-3 text-xs text-fog-500">GridPulse does not contact or reserve a facility. Capacity, staffing, unit availability and acceptance remain unknown unless a verified source is connected.</p>
     </Panel>
   );
 }
@@ -143,7 +230,7 @@ function LocationPanel() {
     <Panel title="Location" action={<span className="text-xs text-fog-500">{inc.lat.toFixed(5)}, {inc.lon.toFixed(5)}</span>}>
       {city.data ? (
         <CityMap city={city.data} className="h-72" focus={[[inc.lat, inc.lon]]} hazard={detail?.hazard_geometry ?? []}
-          closures={overlay.data?.closures ?? []} pois={overlay.data?.pois ?? []}
+          closures={overlay.data?.closures ?? []} pois={relevantFacilities(detail)}
           signals={overlay.data?.nodes.filter((n) => n.kind === "signal") ?? []}
           markers={[{ id: "inc", lat: inc.lat, lon: inc.lon, label: inc.reference ?? "Report", detail: "reported location" }]} />
       ) : <Skeleton className="h-72 w-full" />}
@@ -152,6 +239,7 @@ function LocationPanel() {
           { color: COLORS.incident, label: "Reported location", dot: true },
           { color: COLORS.hazard, label: "Modelled hazard area" },
           { color: COLORS.closed, label: "Existing closure", dashed: true },
+          ...(relevantFacilities(detail).length ? [{ color: COLORS.poi.police, label: "Ranked facility candidates (P / F / H)", dot: true }] : []),
         ]} />
         {geo ? (
           <p className="text-fog-400">
@@ -175,8 +263,11 @@ export default function OverviewTab() {
   if (!detail) return <LoadingBlock rows={4} />;
   const a = detail.assessment;
   const ev = detail.evidence;
-  const mobility = detail.proposals.find((p) => p.agent === "mobility");
+  // Latest proposals win: a revision recomputes routes, facilities and the traffic analysis.
+  const mobility = [...detail.proposals].reverse().find((p) => p.agent === "mobility" && p.payload.facility_recommendations);
   const facilities = (mobility?.payload.facility_recommendations as FacilityRecommendation[] | undefined) ?? [];
+  const trafficProposal = [...detail.proposals].reverse().find((p) => p.agent === "traffic");
+  const services = detail.services ?? [];
   return (
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
       <div className="grid min-w-0 grid-cols-1 content-start gap-6 lg:col-span-7">
@@ -187,7 +278,7 @@ export default function OverviewTab() {
               <blockquote className="text-[15px] leading-relaxed text-fog-100">{detail.incident.report_text}</blockquote>
               <figcaption className="mt-2 text-xs text-fog-500">
                 {detail.incident.reporter_alias}
-                {detail.incident.observed_at ? ` · observed ${clock(detail.incident.observed_at)}` : ""}
+                {` · received ${when(detail.incident.created_at)}`}
                 {detail.incident.verified_at ? ` · confirmed by ${detail.verified_by}` : " · unverified until corroborated"}
               </figcaption>
             </div>
@@ -239,8 +330,10 @@ export default function OverviewTab() {
             <ul className="grid gap-3">{detail.proposals.map((p) => <ProposalCard key={p.id} p={p} />)}</ul>
           )}
         </Panel>
-        {a && <ResponderPanel recommendations={a.responder_recommendations ?? []} />}
-        {(a?.medical_need !== "not_indicated" || facilities.length > 0) && <FacilityPanel recommendations={facilities} />}
+        {services.length > 0 ? <ServicesPanel services={services} />
+          : a && <ResponderPanel recommendations={a.responder_recommendations ?? []} />}
+        <TrafficPanel t={(trafficProposal?.payload as unknown as TrafficAnalysis | undefined) ?? null} />
+        {facilities.length > 0 && <FacilityPanel recommendations={facilities} />}
       </div>
 
       <div className="grid min-w-0 grid-cols-1 content-start gap-6 lg:col-span-5">

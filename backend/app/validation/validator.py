@@ -5,11 +5,14 @@ Rules
                           and may not use closed segments or the reported hazard area
   R2 INFRA_DEPENDENCY     routes may not depend on signals the plan (or current state) leaves dark
                           (signal locations are real OSM data; their power model is simulated)
-  R3 ACTION_VALIDITY      action types, targets and parameters must match the allowlist
+  R3 ACTION_VALIDITY      action types, targets and parameters must match the allowlist; one route per
+                          purpose, and a route's service must match its purpose
   R4 APPROVAL_REQUIRED    high-impact actions need operator approval of this exact plan version
   R5 STALE_STATE          a plan validated/approved against an older city state must be revalidated
   R6 EVIDENCE             high-impact actions need sensor-corroborated or operator-confirmed evidence
   R7 UNRESOLVED_CONFLICT  added by the coordinator when revisions are exhausted
+  R8 TRAFFIC_DATA         warnings on the traffic picture: no live feed, a failed analysis, or an
+                          analysis made for another plan or city-state version
 """
 
 from __future__ import annotations
@@ -19,7 +22,7 @@ from typing import Any
 
 from app.schemas.agents import SUPPORTING_STATUSES, EvidenceAssessment
 from app.simulation.state import ActionSpec, CitySnapshot, apply_actions
-from app.validation.actions import ACTION_TYPES, ROUTE_ACTIONS, validate_params
+from app.validation.actions import ACTION_TYPES, ROUTE_ACTIONS, ROUTE_SERVICE, validate_params
 
 
 @dataclass
@@ -86,6 +89,7 @@ def validate_plan(
     *,
     expected_state_version: int | None = None,
     traffic: dict[str, Any] | None = None,
+    plan_version: int | None = None,
 ) -> ValidationResult:
     findings: list[Finding] = []
 
@@ -93,8 +97,7 @@ def validate_plan(
     if expected_state_version is not None and expected_state_version != snapshot.state_version:
         findings.append(Finding(
             "R5_STALE_STATE", "blocking", "City state changed since this plan was checked",
-            f"The plan was validated against city state v{expected_state_version}, but the city is now at "
-            f"v{snapshot.state_version}. Its safety conclusions no longer hold.",
+            "The city state has changed since this plan was checked, so its safety conclusions no longer hold.",
             "Revalidate the plan against the current state and request a fresh approval.",
             evidence={"expected_state_version": expected_state_version, "current_state_version": snapshot.state_version},
         ))
@@ -138,6 +141,25 @@ def validate_plan(
                                     "Remove the duplicate.", agent=a.proposed_by, action_seq=a.seq))
         seen.add(key)
         valid.append(a)
+
+    # One route per purpose, and each route's service must match its purpose: no duplicate or
+    # contradictory dispatch (e.g. a "police response" that starts at a fire station).
+    by_purpose: dict[str, list[ActionSpec]] = {}
+    for a in valid:
+        if a.action_type in ROUTE_ACTIONS:
+            by_purpose.setdefault(a.params["purpose"], []).append(a)
+            service = a.params.get("service")
+            if service is not None and ROUTE_SERVICE.get(a.params["purpose"]) != service:
+                findings.append(Finding(
+                    "R3_ACTION_VALIDITY", "blocking", "Route service does not match its purpose",
+                    f"Action #{a.seq} is a {a.params['purpose'].replace('_', ' ')} route labelled for {service}.",
+                    "Recompute the route from a facility of the right service.", agent=a.proposed_by, action_seq=a.seq))
+    for purpose, items in by_purpose.items():
+        for dup in items[1:]:
+            findings.append(Finding(
+                "R3_ACTION_VALIDITY", "blocking", f"Duplicate {purpose.replace('_', ' ')} route",
+                f"Action #{dup.seq} designates a second {purpose.replace('_', ' ')} route (first: #{items[0].seq}).",
+                "Keep one route per purpose.", agent=dup.proposed_by, action_seq=dup.seq))
 
     projected, changes = apply_actions(snapshot, valid)
     closed_by_plan = {s for a in valid if a.action_type == "close_roads" for s in _segments(a)}
@@ -193,25 +215,43 @@ def validate_plan(
                                     "Some segments on the route are under caution.", "Prefer open segments if available.",
                                     agent=r.proposed_by, action_seq=r.seq, evidence={"segments": caution}))
 
-    # R8 — traffic-data quality ----------------------------------------------------------------
+    # R8 — traffic-data quality --------------------------------------------------------------
+    # Warnings only: unsafe routes are blocked by R1/R2 above. R8 says how much the traffic picture
+    # behind the plan can be trusted (no live feed, a failed analysis, or one made for another version).
     if traffic is not None:
-        live_status = traffic.get("live_traffic", "unavailable")
-        if live_status != "available":
+        tv_state, tv_plan = traffic.get("state_version"), traffic.get("plan_version")
+        if traffic.get("status") == "failed":
+            findings.append(Finding(
+                "R8_TRAFFIC_DATA", "warning", "Traffic analysis unavailable",
+                f"AnalyseTraffic could not assess this plan ({traffic.get('error') or 'error'}). Routes were still "
+                "checked against closures, the hazard area and power dependencies.",
+                "Review the routes manually before approving.", agent="traffic",
+                evidence={"status": "failed", "plan_version": tv_plan}))
+        elif (tv_state is not None and tv_state != snapshot.state_version) or (
+                plan_version is not None and tv_plan is not None and tv_plan != plan_version):
+            findings.append(Finding(
+                "R8_TRAFFIC_DATA", "warning", "Traffic analysis is out of date",
+                "The traffic analysis was made for a different plan version or an earlier city state.",
+                "Re-run the analysis; do not rely on its route assessments.", agent="traffic",
+                evidence={"analysis_plan_version": tv_plan, "analysis_state_version": tv_state,
+                          "plan_version": plan_version, "current_state_version": snapshot.state_version}))
+        if traffic.get("live_traffic", "unavailable") != "available":
             findings.append(Finding(
                 "R8_TRAFFIC_DATA", "warning", "Live traffic data unavailable",
                 "Traffic impacts and travel times are estimated from the versioned OSM road graph and simulated "
                 "closures; no live congestion or signal timing was observed.",
                 "Treat the estimate as uncertain and verify current access through authorized operators before any "
                 "real-world action. GridPulse execution remains simulation-only.",
-                agent="traffic", evidence={"live_traffic": live_status, "data_source": traffic.get("data_source"),
+                agent="traffic", evidence={"live_traffic": traffic.get("live_traffic", "unavailable"),
+                                             "data_source": traffic.get("data_source"),
                                              "freshness": traffic.get("freshness")},
             ))
-        for conflict in traffic.get("conflicts", [])[:10]:
-            findings.append(Finding(
-                "R8_TRAFFIC_DATA", "warning", "Traffic coordination consideration", conflict,
-                "Use one coordinated plan and do not add contradictory road controls.", agent="traffic",
-                evidence={"conflict": conflict},
-            ))
+        for ra in traffic.get("route_assessments", []):
+            if ra.get("status") != "blocked" and not ra.get("alternative") and ra.get("alternative_note"):
+                findings.append(Finding(
+                    "R8_TRAFFIC_DATA", "info", f"No alternative for {ra['name']}",
+                    ra["alternative_note"], "If this route becomes blocked there is no fallback; monitor it.",
+                    agent="traffic", evidence={"purpose": ra.get("purpose")}))
 
     # R2 — infrastructure dependencies --------------------------------------------------------
     utility_actions = [a for a in valid if ACTION_TYPES[a.action_type].owner == "grid"]

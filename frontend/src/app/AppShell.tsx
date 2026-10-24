@@ -28,7 +28,7 @@ function Header() {
         <div className="ml-auto flex items-center gap-2 text-[11px]">
           {s && (
             <span className="hidden rounded-full bg-white/[0.05] px-2.5 py-1 text-fog-300 ring-1 ring-inset ring-white/10 lg:inline">
-              Mangaluru · state v{s.state_version}{s.active_scenario ? ` · demo ${s.active_scenario.code}` : ""}
+              Mangaluru{s.active_scenario ? ` · demo scenario ${s.active_scenario.code} loaded` : " · no demo scenario"}
             </span>
           )}
           {s && (

@@ -19,13 +19,13 @@ function PlanIdentity({ plan }: { plan: Plan }) {
         <dt className="text-xs text-fog-500">Content hash</dt>
         <dd className="font-mono text-xs text-fog-300" title={plan.content_hash}>{plan.content_hash.slice(0, 16)}…</dd>
       </div>
-      <div>
-        <dt className="text-xs text-fog-500">Validated against</dt>
-        <dd className="text-fog-100">{v ? `city state v${v.state_version}` : "not validated"}</dd>
-      </div>
-      <div>
-        <dt className="text-xs text-fog-500">Current city state</dt>
-        <dd className={cx(v && v.state_version !== plan.current_state_version && plan.status !== "EXECUTED" ? "text-warn" : "text-fog-100")}>v{plan.current_state_version}</dd>
+      <div className="col-span-2">
+        <dt className="text-xs text-fog-500">City state</dt>
+        {/* The version numbers stay internal; the operator sees what they mean. */}
+        <dd className={cx(!v ? "text-fog-400" : v.state_version !== plan.current_state_version && plan.status !== "EXECUTED" ? "text-warn" : "text-ok")}>
+          {!v ? "Not validated yet" : plan.status === "EXECUTED" ? "Applied to the simulation"
+            : v.state_version !== plan.current_state_version ? "Changed since this plan was validated" : "Unchanged since validation"}
+        </dd>
       </div>
     </dl>
   );
@@ -35,7 +35,7 @@ function ExecutionResult({ plan }: { plan: Plan }) {
   const ex = plan.execution!;
   return (
     <Panel title={<span className="flex items-center gap-2"><CheckCircle size={18} weight="fill" className="text-ok" /> Executed in the simulation</span>}
-      action={<Badge tone="ok">state v{ex.state_version_before} → v{ex.state_version_after}</Badge>}>
+      action={<Badge tone="ok">simulated city state updated</Badge>}>
       <p className="text-sm text-fog-400">
         {ex.executed_by} executed plan v{plan.version} at {clock(ex.executed_at)}. {ex.notes}
       </p>
@@ -137,7 +137,7 @@ export default function ApprovalTab() {
                     <Badge tone={a.status === "invalidated" ? "warn" : "neutral"}>{a.status}</Badge>
                     <span className="text-xs text-fog-500">by {a.operator} at {clock(a.created_at)}</span>
                   </div>
-                  <p className="mt-1 text-xs text-fog-500">Bound to v{a.plan_version}, hash {a.plan_content_hash.slice(0, 10)}…, city state v{a.state_version}</p>
+                  <p className="mt-1 text-xs text-fog-500">Bound to plan v{a.plan_version} (hash {a.plan_content_hash.slice(0, 10)}…) and the city state at the time</p>
                   {a.invalidated_reason && <p className="mt-1 text-xs text-warn">{a.invalidated_reason}</p>}
                   {a.note && <p className="mt-1 text-xs text-fog-400">“{a.note}”</p>}
                 </li>
@@ -170,7 +170,7 @@ export default function ApprovalTab() {
 
               {plan.status === "STALE" && (
                 <div className="grid gap-2 rounded-xl bg-warn/[0.06] p-3 ring-1 ring-inset ring-warn/20">
-                  <p className="text-sm text-warn">The city changed after this plan was validated or approved. It must be revalidated and approved again.</p>
+                  <p className="text-sm text-warn">The city state has changed since this plan was generated. Revalidate the plan before approving or executing it.</p>
                   <Button variant="ghost" disabled={!opValid} loading={revalidate.isPending} onClick={() => revalidate.mutate(plan.id)}>
                     <ArrowsClockwise size={15} /> Revalidate against current state
                   </Button>
@@ -180,7 +180,7 @@ export default function ApprovalTab() {
               {confirm ? (
                 <div role="alertdialog" aria-labelledby="confirm-title" className="grid gap-3 rounded-xl border border-white/12 bg-white/[0.04] p-4">
                   <p id="confirm-title" className="text-sm text-fog-100">
-                    {confirm === "approve" && `Approve plan v${plan.version} (${plan.content_hash.slice(0, 10)}…)? This authorizes ${plan.actions.length} simulated actions against city state v${plan.current_state_version}.`}
+                    {confirm === "approve" && `Approve plan v${plan.version} (${plan.content_hash.slice(0, 10)}…)? This authorizes ${plan.actions.length} simulated actions against the current city state.`}
                     {confirm === "reject" && `Reject plan v${plan.version}? No simulated actions will be applied.`}
                     {confirm === "execute" && `Execute approved plan v${plan.version} in the simulation? The backend revalidates it against the current city state first.`}
                   </p>

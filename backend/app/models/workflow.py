@@ -39,6 +39,7 @@ INCIDENT_STATUSES = (
     "NO_SAFE_PLAN",
     "FAILED",
     "DISMISSED",
+    "RESOLVED",
 )
 INCIDENT_SOURCES = ("citizen_portal", "demo_scenario", "legacy")
 PLAN_STATUSES = (
@@ -100,6 +101,10 @@ class Incident(Base, TimestampMixin):
     dismissed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     dismissed_by_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("operators.id", ondelete="RESTRICT"))
     dismissal_reason: Mapped[str | None] = mapped_column(String(500))
+    # An operator closed the emergency after its response. The record and its audit trail are kept.
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    resolved_by_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("operators.id", ondelete="RESTRICT"))
+    resolution_note: Mapped[str | None] = mapped_column(String(500))
     run_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     run_finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow)

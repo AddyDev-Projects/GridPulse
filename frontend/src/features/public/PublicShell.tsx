@@ -1,5 +1,4 @@
 import { NavLink, Outlet, Link } from "react-router";
-import { Phone } from "@phosphor-icons/react";
 import { BrandMark } from "../landing/LandingPage";
 import { cx } from "../../components/ui";
 
@@ -24,12 +23,6 @@ export default function PublicShell() {
           </Link>
         </div>
       </header>
-      <div className="border-b border-warn/20 bg-warn/[0.06]">
-        <p className="mx-auto flex max-w-[1280px] items-center gap-2 px-4 py-2 text-xs text-warn sm:px-6">
-          <Phone size={14} weight="fill" className="shrink-0" />
-          GridPulse is a hackathon simulation and does not dispatch real services. If anyone is in danger, call 112.
-        </p>
-      </div>
       <main id="main" className="mx-auto max-w-[1280px] px-4 pb-20 pt-8 sm:px-6">
         <Outlet />
       </main>

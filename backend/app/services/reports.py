@@ -7,7 +7,6 @@ creates incidents. The public view exposes only coarse, non-sensitive fields.
 from __future__ import annotations
 
 import secrets
-from datetime import datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -46,7 +45,6 @@ def create_report(
     lon: float,
     indicators: list[str],
     location_description: str | None,
-    observed_at: datetime | None,
     source: str,
     client_key_hash: str | None = None,
 ) -> Incident:
@@ -55,12 +53,8 @@ def create_report(
         raise ReportError(422, "outside_coverage",
                           f"The location is outside GridPulse's mapped Mangaluru coverage area "
                           f"({s:.3f} to {n:.3f}°N, {w:.3f} to {e:.3f}°E). Move the pin inside the dashed outline.")
+    # Server time (UTC) is authoritative: the emergency is taken as observed when the report is accepted.
     now = utcnow()
-    if observed_at is not None:
-        if observed_at.tzinfo is None:
-            raise ReportError(422, "invalid_time", "Observation time must include a timezone.")
-        if observed_at > now + timedelta(minutes=5) or observed_at < now - timedelta(days=7):
-            raise ReportError(422, "invalid_time", "Observation time must be within the last 7 days and not in the future.")
     meta = get_meta(db)
     snap = graph.nearest_segment(lat, lon, MAX_SNAP_M)
     inc = Incident(
@@ -68,7 +62,7 @@ def create_report(
         if source == "citizen_portal" else "Demo scenario (simulated report)",
         report_text=description, location_hint=location_description, location_description=location_description,
         category=category, lat=round(lat, 6), lon=round(lon, 6), segment_id=snap[0] if snap else None,
-        indicators=list(indicators), observed_at=observed_at, source=source, city_id=meta.city_id,
+        indicators=list(indicators), observed_at=now, created_at=now, source=source, city_id=meta.city_id,
         client_key_hash=client_key_hash, reference=new_reference(db), status="REPORTED",
     )
     db.add(inc)
@@ -88,6 +82,8 @@ def public_status(inc: Incident) -> tuple[str, str]:
     s = inc.status
     if s == "DISMISSED":
         return "closed", "Reviewed and closed by an operator"
+    if s == "RESOLVED":
+        return "resolved", "Resolved: an operator closed this emergency"
     if s == "REPORTED" and inc.run_started_at is None:
         return ("confirmed", "Confirmed by an operator; response being planned") if inc.verified_at else \
             ("received", "Received; waiting for operator review")

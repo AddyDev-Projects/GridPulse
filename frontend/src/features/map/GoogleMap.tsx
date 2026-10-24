@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { publicApi } from "../../services/api";
 import type { CityMapProps } from "./CityMap";
+import { ALT_DASH, CASING_WIDTH, COLORS, POI_GLYPH, ROUTE_DASH, ROUTE_WIDTH, poiTitle } from "./mapTheme";
 
 type GoogleApi = any;
 
@@ -66,12 +67,20 @@ export function GoogleMapCanvas({
   focus,
   picked,
   onPick,
-}: CityMapProps & { apiKey: string; onFailure: (reason: string) => void }) {
+  showTraffic = false,
+  onTrafficAvailable,
+}: CityMapProps & {
+  apiKey: string;
+  onFailure: (reason: string) => void;
+  showTraffic?: boolean;
+  onTrafficAvailable?: (available: boolean) => void;
+}) {
   const rootRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<GoogleApi>(null);
   const overlayRef = useRef<GoogleApi[]>([]);
   const graphOverlayRef = useRef<GoogleApi[]>([]);
   const infoWindowRef = useRef<GoogleApi>(null);
+  const trafficRef = useRef<GoogleApi>(null);
   const onPickRef = useRef(onPick);
   const [ready, setReady] = useState(false);
   const [graphNote, setGraphNote] = useState<string | null>(null);
@@ -86,7 +95,6 @@ export function GoogleMapCanvas({
     let cancelled = false;
     let clickListener: GoogleApi;
     let idleListener: GoogleApi;
-    let trafficLayer: GoogleApi;
     loadGoogleMaps(apiKey)
       .then((g) => {
         if (cancelled || !rootRef.current) return;
@@ -109,13 +117,17 @@ export function GoogleMapCanvas({
             { featureType: "road", elementType: "geometry", stylers: [{ color: "#2e2840" }] },
             { featureType: "road.highway", elementType: "geometry", stylers: [{ color: "#4b4167" }] },
             { featureType: "water", elementType: "geometry", stylers: [{ color: "#101b2d" }] },
+            // Google's own points of interest (shops, restaurants, its hospital pins) and transit icons compete
+            // with the facilities GridPulse ranked for this incident, so the basemap shows streets and labels only.
+            { featureType: "poi", stylers: [{ visibility: "off" }] },
+            { featureType: "transit", stylers: [{ visibility: "off" }] },
           ],
         });
         mapRef.current = map;
-        if (import.meta.env.VITE_GOOGLE_MAPS_TRAFFIC_LAYER === "true" && g.maps.TrafficLayer) {
-          trafficLayer = new g.maps.TrafficLayer();
-          trafficLayer.setMap(map);
-        }
+        // Google's TrafficLayer is a picture for the operator only. It is never read back as data:
+        // GridPulse routing and validation use the OSM graph and simulated closures.
+        if (g.maps.TrafficLayer) trafficRef.current = new g.maps.TrafficLayer();
+        onTrafficAvailable?.(Boolean(trafficRef.current));
         const bounds = new g.maps.LatLngBounds({ lat: south, lng: west }, { lat: north, lng: east });
         map.fitBounds(bounds);
         clickListener = map.addListener("click", (event: GoogleApi) => {
@@ -156,7 +168,9 @@ export function GoogleMapCanvas({
       cancelled = true;
       clickListener?.remove();
       idleListener?.remove();
-      trafficLayer?.setMap(null);
+      infoWindowRef.current?.close();
+      trafficRef.current?.setMap(null);
+      trafficRef.current = null;
       overlayRef.current.forEach((item) => item.setMap(null));
       graphOverlayRef.current.forEach((item) => item.setMap(null));
       overlayRef.current = [];
@@ -166,6 +180,12 @@ export function GoogleMapCanvas({
     // The map is intentionally initialized once per provider attempt. Overlay updates are handled below.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [apiKey]);
+
+  // Show or hide the visual traffic layer without rebuilding the map or its overlays.
+  useEffect(() => {
+    if (!ready || !trafficRef.current) return;
+    trafficRef.current.setMap(showTraffic ? mapRef.current : null);
+  }, [ready, showTraffic]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -199,13 +219,34 @@ export function GoogleMapCanvas({
       map, path: path(closure.geometry), strokeColor: closure.kind === "closed" ? "#ff7186" : "#f6c453",
       strokeOpacity: 0.95, strokeWeight: 5, clickable: false,
     })));
-    routes.forEach((route) => overlayRef.current.push(new g.maps.Polyline({
-      map, path: path(route.geometry), strokeColor: route.tone === "route" ? "#4ade9b" : route.tone === "routeAlt" ? "#7cc7ff" : "#ff7186",
-      strokeOpacity: 0.95, strokeWeight: 5, strokeDasharray: route.tone === "conflict" ? [10, 8] : undefined, clickable: false,
+    // Routes: a dark casing under a high-contrast core, above Google's traffic lines (zIndex). Google
+    // polylines have no dash option, so patterned routes are drawn as repeated line symbols.
+    const pattern = (dash: string | undefined, color: string, weight: number) => {
+      if (!dash) return undefined;
+      const [on, off] = dash.split(" ").map(Number);
+      return [{ icon: { path: `M 0,0 0,${Math.max(on, 0.5)}`, strokeOpacity: 1, strokeColor: color, strokeWeight: weight, scale: 1 },
+        offset: "0", repeat: `${on + off}px` }];
+    };
+    routes.filter((r) => r.alternative).forEach((route) => overlayRef.current.push(new g.maps.Polyline({
+      map, path: path(route.geometry), strokeOpacity: 0, strokeWeight: 3, clickable: false, zIndex: 19,
+      icons: pattern(ALT_DASH, COLORS[route.tone], 3),
     })));
+    routes.filter((r) => !r.alternative).forEach((route) => {
+      overlayRef.current.push(new g.maps.Polyline({
+        map, path: path(route.geometry), strokeColor: COLORS.casing, strokeOpacity: 0.85, strokeWeight: CASING_WIDTH,
+        clickable: false, zIndex: 20,
+      }));
+      const dash = ROUTE_DASH[route.tone];
+      overlayRef.current.push(new g.maps.Polyline({
+        map, path: path(route.geometry), strokeColor: COLORS[route.tone], strokeOpacity: dash ? 0 : 1,
+        strokeWeight: ROUTE_WIDTH, clickable: false, zIndex: 21, icons: pattern(dash, COLORS[route.tone], ROUTE_WIDTH),
+      }));
+    });
     pois.forEach((poi) => overlayRef.current.push(new g.maps.Marker({
-      map, position: { lat: poi.lat, lng: poi.lon }, title: `${poi.name} (${poi.kind.replace("_", " ")}, OpenStreetMap)`,
-      icon: { path: g.maps.SymbolPath.CIRCLE, scale: 5, fillColor: poi.kind === "hospital" ? "#7cc7ff" : poi.kind === "fire_station" ? "#ff9f6b" : "#cfc2ff", fillOpacity: 0.9, strokeColor: "#0c0a12", strokeWeight: 1 },
+      map, position: { lat: poi.lat, lng: poi.lon }, title: poiTitle(poi), zIndex: 1,
+      label: poi.kind === "hospital" ? undefined : { text: POI_GLYPH[poi.kind], color: "#07060b", fontSize: "10px", fontWeight: "700" },
+      icon: { path: g.maps.SymbolPath.CIRCLE, scale: poi.kind === "hospital" ? 5 : 8, fillColor: COLORS.poi[poi.kind] ?? "#c9c5d6",
+        fillOpacity: 0.95, strokeColor: "#07060b", strokeWeight: 1.5 },
     })));
     signals.forEach((signal) => overlayRef.current.push(new g.maps.Marker({
       map, position: { lat: signal.lat, lng: signal.lon }, title: `${signal.name}: ${signal.status}. Location from OSM; power model simulated.`,
@@ -213,9 +254,11 @@ export function GoogleMapCanvas({
     })));
     const info = infoWindowRef.current ?? new g.maps.InfoWindow();
     infoWindowRef.current = info;
+    info.close(); // never leave a popup anchored to a marker that was just removed (e.g. a resolved incident)
     markers.forEach((marker) => {
-      const item = new g.maps.Marker({ map, position: { lat: marker.lat, lng: marker.lon }, title: marker.detail ? `${marker.label}: ${marker.detail}` : marker.label,
-        icon: { path: g.maps.SymbolPath.CIRCLE, scale: marker.radius ? Math.min(13, Math.max(6, marker.radius / 1.4)) : 8, fillColor: marker.color ?? "#f3b8f5", fillOpacity: 0.9, strokeColor: "#ffffff", strokeWeight: 2 } });
+      const item = new g.maps.Marker({ map, position: { lat: marker.lat, lng: marker.lon }, zIndex: 30,
+        title: marker.detail ? `${marker.label}: ${marker.detail}` : marker.label,
+        icon: { path: g.maps.SymbolPath.CIRCLE, scale: marker.radius ? Math.min(13, Math.max(6, marker.radius / 1.4)) : 8, fillColor: marker.color ?? COLORS.incident, fillOpacity: 0.95, strokeColor: "#ffffff", strokeWeight: 2.5 } });
       if (marker.onClick || marker.detail) item.addListener("click", () => {
         marker.onClick?.();
         if (marker.detail) {
@@ -229,7 +272,7 @@ export function GoogleMapCanvas({
       });
       overlayRef.current.push(item);
     });
-    if (picked) overlayRef.current.push(new g.maps.Marker({ map, position: { lat: picked[0], lng: picked[1] }, title: "Reported location", icon: { path: g.maps.SymbolPath.CIRCLE, scale: 10, fillColor: "#f3b8f5", fillOpacity: 0.95, strokeColor: "#ffffff", strokeWeight: 3 } }));
+    if (picked) overlayRef.current.push(new g.maps.Marker({ map, position: { lat: picked[0], lng: picked[1] }, title: "Reported location", icon: { path: g.maps.SymbolPath.CIRCLE, scale: 10, fillColor: COLORS.incident, fillOpacity: 0.95, strokeColor: "#ffffff", strokeWeight: 3 } }));
 
     if (focus && focus.length > 1) {
       const focusBounds = new g.maps.LatLngBounds();

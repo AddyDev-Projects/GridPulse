@@ -21,7 +21,7 @@ const NAV = [
   { label: "Overview", href: "#top" },
   { label: "How It Works", href: "#how" },
   { label: "Report a hazard", to: "/report" },
-  { label: "Live map", to: "/status" },
+  { label: "Public map", to: "/status" },
   { label: "Architecture", href: "#architecture" },
 ];
 
@@ -151,9 +151,9 @@ function Hero() {
 }
 
 const FLOW = [
-  { verb: "Report", agent: "Citizen", text: "A resident pins a hazard on the map of Mangaluru and describes it. No account needed." },
+  { verb: "Report", agent: "Citizen", text: "A resident describes the hazard, by typing or speaking, at their detected or chosen location. No account needed." },
   { verb: "Triage", agent: "Sentinel", text: "Structures the report, separates facts from inferences, and pulls synthetic sensor evidence." },
-  { verb: "Propose", agent: "Mobility + Traffic + Grid", text: "Mobility routes responders, AnalyseTraffic checks disruption and route conflicts, and Grid models utility dependencies." },
+  { verb: "Propose", agent: "Mobility + Traffic + Grid", text: "Only the services the report justifies are routed. AnalyseTraffic assesses each route and alternatives on estimated free-flow times, and Grid models utility dependencies." },
   { verb: "Validate", agent: "Validator", text: "Deterministic rules check every route, dependency, target and piece of evidence." },
   { verb: "Revise", agent: "Coordinator", text: "Findings go back to the responsible agent. A new plan version is checked again." },
   { verb: "Decide", agent: "Operator", text: "A human approves or rejects the exact plan version. Only then does the simulated city change." },
@@ -239,11 +239,11 @@ function Architecture() {
           <ShieldCheck size={26} className="text-lilac-200" />
           <h3 className="mt-5 font-display text-xl font-medium text-fog-100">Deterministic validator</h3>
           <p className="mt-2 max-w-[54ch] text-sm leading-relaxed text-fog-400">
-            Seven explicit rules: road safety, infrastructure dependencies, action allowlists, approval, stale state,
-            evidence quality and unresolved conflicts. No model can override a blocking finding.
+            Eight explicit rules: road safety, infrastructure dependencies, action allowlists, approval, stale state,
+            evidence quality, unresolved conflicts and traffic-data quality. No model can override a blocking finding.
           </p>
           <div className="mt-6 flex flex-wrap gap-2">
-            {["R1 Road safety", "R2 Dependencies", "R3 Allowlist", "R4 Approval", "R5 Stale state", "R6 Evidence", "R7 Escalation"].map((r) => (
+            {["R1 Road safety", "R2 Dependencies", "R3 Allowlist", "R4 Approval", "R5 Stale state", "R6 Evidence", "R7 Escalation", "R8 Traffic data"].map((r) => (
               <span key={r} className="rounded-full bg-white/[0.05] px-3 py-1 font-mono text-[11px] text-fog-300 ring-1 ring-inset ring-white/10">
                 {r}
               </span>
@@ -275,7 +275,7 @@ function Architecture() {
           <Database size={26} className="text-ok" />
           <h3 className="mt-5 font-display text-xl font-medium text-fog-100">PostgreSQL audit</h3>
           <p className="mt-2 text-sm leading-relaxed text-fog-400">
-            Every plan version, finding, revision, decision and execution is persisted and replayable.
+            Every plan version, finding, revision, decision and execution is persisted in an append-only audit trail.
           </p>
         </article>
       </div>

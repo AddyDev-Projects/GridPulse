@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useReducedMotion } from "../../hooks/useReducedMotion";
 import { cx } from "../../components/ui";
+import { GlobeParticles } from "./GlobeParticles";
 
 export const GLOBE_STILL =
   "https://d2ol7oe51mr4n9.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/f1631235-0a76-464d-8f1d-2c4b48a997d5.jpg";
@@ -114,6 +115,7 @@ export function GlobeBackdrop() {
           <i className="globe-particle globe-particle-b" />
           <i className="globe-particle globe-particle-c" />
           <i className="globe-particle globe-particle-d" />
+          {!reduced && <GlobeParticles />}
         </div>
         {/* Fallback glow when neither media layer is usable. */}
         {stillFailed && (videoFailed || reduced) && (

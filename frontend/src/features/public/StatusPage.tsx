@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Link, useSearchParams } from "react-router";
 import { ArrowClockwise, MagnifyingGlass } from "@phosphor-icons/react";
 import { useCity, usePublicClosures, usePublicIncidents, usePublicRecentIncidents, useReportStatus } from "../../hooks/queries";
-import { Badge, Button, Empty, ErrorState, Panel, Skeleton, humanize, timeAgo } from "../../components/ui";
+import { Badge, Button, Empty, ErrorState, Panel, Skeleton, humanize, timeAgo, when } from "../../components/ui";
 import { COLORS, CityMap, MapLegend } from "../map/CityMap";
 
 const TONE: Record<string, "ok" | "warn" | "bad" | "info" | "accent" | "neutral"> = {
@@ -32,7 +32,7 @@ function Lookup() {
               <div className="flex flex-wrap items-center gap-2">
                 <span className="font-mono text-lilac-200">{status.data.reference}</span>
                 <Badge tone={TONE[status.data.status] ?? "neutral"}>{humanize(status.data.status)}</Badge>
-                <span className="text-xs text-fog-500">{humanize(status.data.category)} · reported {timeAgo(status.data.submitted_at)}</span>
+                <span className="text-xs text-fog-500">{humanize(status.data.category)} · reported <time dateTime={status.data.submitted_at} title={when(status.data.submitted_at)}>{timeAgo(status.data.submitted_at)}</time></span>
               </div>
               <p className="mt-2 text-sm text-fog-100">{status.data.status_label}</p>
               {status.data.public_note && <p className="mt-2 text-sm text-warn">{status.data.public_note}</p>}
@@ -77,7 +77,7 @@ export default function StatusPage() {
                         <div className="flex flex-wrap items-center gap-2">
                           <span className="font-mono text-xs text-lilac-200">{i.reference}</span>
                           <Badge tone={TONE[i.status] ?? "neutral"}>{humanize(i.category)}</Badge>
-                          <span className="text-xs text-fog-500">{timeAgo(i.reported_at)}</span>
+                          <time dateTime={i.reported_at} title={when(i.reported_at)} className="text-xs text-fog-500">{timeAgo(i.reported_at)}</time>
                         </div>
                         <p className="mt-1 text-xs text-fog-400">{i.location}</p>
                         <p className="mt-0.5 text-xs text-fog-500">{i.status_label}</p>

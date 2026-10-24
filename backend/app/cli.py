@@ -150,7 +150,7 @@ def cmd_demo(args: argparse.Namespace) -> int:
             r = scenario_report(sc)
             inc = create_report(db, mangaluru_graph(), category=r["category"], description=r["description"],
                                 lat=r["lat"], lon=r["lon"], indicators=r["indicators"],
-                                location_description=r["location_description"], observed_at=None, source="demo_scenario")
+                                location_description=r["location_description"], source="demo_scenario")
             ref = inc.reference
         db.commit()
         print(f"Loaded scenario {sc.code}: {sc.title}. City state v{meta.state_version}."

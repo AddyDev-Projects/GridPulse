@@ -1,6 +1,7 @@
+import { useEffect, useRef } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, authApi, publicApi, type DecisionBody } from "../services/api";
-import type { PublicReportInput } from "../types/api";
+import type { IncidentSummary, PublicReportInput } from "../types/api";
 
 export const keys = {
   me: ["me"] as const,
@@ -77,12 +78,25 @@ export function useWorkflow(id: string) {
   });
 }
 
+// Polling stops when the run ends, so fetch once more on that edge: the last agent outputs land with it.
+function useRefetchWhenRunEnds(running: boolean, refetch: () => unknown) {
+  const was = useRef(running);
+  useEffect(() => {
+    if (was.current && !running) refetch();
+    was.current = running;
+  }, [running, refetch]);
+}
+
 export function useIncident(id: string, running: boolean) {
-  return useQuery({ queryKey: keys.incident(id), queryFn: () => api.incident(id), refetchInterval: running ? 900 : false });
+  const q = useQuery({ queryKey: keys.incident(id), queryFn: () => api.incident(id), refetchInterval: running ? 900 : false });
+  useRefetchWhenRunEnds(running, q.refetch);
+  return q;
 }
 
 export function useIncidentAudit(id: string, running: boolean) {
-  return useQuery({ queryKey: keys.audit(id), queryFn: () => api.incidentAudit(id), refetchInterval: running ? 900 : false });
+  const q = useQuery({ queryKey: keys.audit(id), queryFn: () => api.incidentAudit(id), refetchInterval: running ? 900 : false });
+  useRefetchWhenRunEnds(running, q.refetch);
+  return q;
 }
 
 /** After any mutation, refetch everything derived from server state. Nothing is updated optimistically. */
@@ -106,6 +120,19 @@ export function useIncidentAction() {
   return useMutation({
     mutationFn: (a: { kind: "run" | "verify" | "dismiss"; id: string; text?: string }) =>
       a.kind === "run" ? api.runIncident(a.id) : a.kind === "verify" ? api.verify(a.id, a.text) : api.dismiss(a.id, a.text ?? ""),
+    onSettled: invalidate,
+  });
+}
+
+export function useResolve() {
+  const qc = useQueryClient();
+  const invalidate = useInvalidateAll();
+  return useMutation({
+    mutationFn: (a: { id: string; note?: string; expectedStatus: string }) => api.resolve(a.id, a.note, a.expectedStatus),
+    // Drop it from every cached queue at once so it cannot flash back as active before the refetch lands.
+    onSuccess: (_data, a) => {
+      qc.setQueriesData<IncidentSummary[]>({ queryKey: ["incidents"] }, (rows) => rows?.filter((r) => r.id !== a.id));
+    },
     onSettled: invalidate,
   });
 }

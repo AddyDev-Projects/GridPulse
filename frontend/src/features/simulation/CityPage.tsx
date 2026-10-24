@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useCity, useIncidents, useOverlay } from "../../hooks/queries";
 import { ErrorState, Panel, Skeleton, StatusBadge, humanize } from "../../components/ui";
-import { COLORS, CityMap, MapLegend } from "../map/CityMap";
+import { COLORS, CityMap, MapLegend, SERVICE_LEGEND, routeTone } from "../map/CityMap";
 
 const LAYERS = [
   ["incidents", "Reports"],
@@ -19,7 +19,7 @@ export default function CityPage() {
   const overlay = useOverlay();
   const incidents = useIncidents("current");
   const [on, setOn] = useState<Record<Layer, boolean>>({
-    incidents: true, closures: true, routes: true, signals: true, zones: false, pois: true, graph: false,
+    incidents: true, closures: true, routes: true, signals: true, zones: false, pois: false, graph: false,
   });
   if (city.isError) return <ErrorState error={city.error} onRetry={() => city.refetch()} />;
   const o = overlay.data;
@@ -45,10 +45,10 @@ export default function CityPage() {
         </fieldset>
         {city.data ? (
           <CityMap city={city.data} className="h-[560px]" showGraph={on.graph}
-            markers={on.incidents ? (incidents.data ?? []).filter((i) => i.lat != null).map((i) => ({
+            markers={on.incidents ? (incidents.data ?? []).filter((i) => i.lat != null && i.status !== "DISMISSED").map((i) => ({
               id: i.id, lat: i.lat!, lon: i.lon!, label: i.reference ?? "report", detail: humanize(i.status) })) : []}
             closures={on.closures ? o?.closures ?? [] : []}
-            routes={on.routes ? (o?.active_routes ?? []).map((r) => ({ id: `r${r.id}`, geometry: r.geometry, label: r.name, tone: "route" as const })) : []}
+            routes={on.routes ? (o?.active_routes ?? []).map((r) => ({ id: `r${r.id}`, geometry: r.geometry, label: r.name, tone: routeTone(r.purpose) })) : []}
             signals={on.signals ? o?.nodes.filter((n) => n.kind === "signal") ?? [] : []}
             zones={on.zones ? o?.zones ?? [] : []} pois={on.pois ? o?.pois ?? [] : []} />
         ) : <Skeleton className="h-[560px] w-full" />}
@@ -57,12 +57,9 @@ export default function CityPage() {
             { color: COLORS.incident, label: "Report", dot: true },
             { color: COLORS.closed, label: "Closed", dashed: true },
             { color: COLORS.caution, label: "Caution", dashed: true },
-            { color: COLORS.route, label: "Designated route" },
+            ...SERVICE_LEGEND,
             { color: COLORS.signalOk, label: "Signal powered", dot: true },
             { color: COLORS.signalDark, label: "Signal dark", dot: true },
-            { color: COLORS.poi.hospital, label: "Hospital", dot: true },
-            { color: COLORS.poi.fire_station, label: "Fire station", dot: true },
-            { color: COLORS.poi.police, label: "Police", dot: true },
           ]} />
         </div>
       </Panel>

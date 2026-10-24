@@ -9,7 +9,7 @@ import uuid
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import AgentProposal, AgentRun, PlanAction, ResponsePlan, ValidationFinding, ValidationRun
+from app.models import AgentRun, PlanAction, ResponsePlan, ValidationFinding, ValidationRun
 from app.schemas.agents import EvidenceAssessment, SentinelAssessment
 from app.simulation.state import ActionSpec
 from app.validation.validator import Finding, ValidationResult
@@ -102,14 +102,3 @@ def incident_context(db: Session, incident_id: uuid.UUID) -> tuple[SentinelAsses
         elif r.step == "evidence" and r.output:
             evidence = EvidenceAssessment.model_validate(r.output)
     return assessment, evidence
-
-
-def incident_traffic(db: Session, incident_id: uuid.UUID) -> dict | None:
-    """Return the latest AnalyseTraffic output so later validation sees the same data-quality context."""
-    proposal = db.scalars(
-        select(AgentProposal)
-        .where(AgentProposal.incident_id == incident_id, AgentProposal.agent == "traffic")
-        .order_by(AgentProposal.created_at.desc())
-        .limit(1)
-    ).first()
-    return dict(proposal.payload) if proposal and proposal.payload else None

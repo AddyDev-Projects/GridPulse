@@ -1,4 +1,4 @@
-import type { Finding, PlanAction, Workflow } from "../../types/api";
+import type { FacilityRecommendation, Finding, IncidentDetail, PlanAction, Poi, TrafficAnalysis, Workflow } from "../../types/api";
 import { AGENT_LABEL, Badge, SeverityIcon, cx } from "../../components/ui";
 import { CheckCircle, Circle, XCircle } from "@phosphor-icons/react";
 
@@ -13,6 +13,7 @@ export const STAGES: { status: string; label: string }[] = [
   { status: "AWAITING_APPROVAL", label: "Approval" },
   { status: "APPROVED", label: "Approved" },
   { status: "EXECUTED", label: "Executed" },
+  { status: "RESOLVED", label: "Resolved" },
 ];
 const TERMINAL_BAD = new Set(["REJECTED", "ESCALATED", "NO_SAFE_PLAN", "FAILED", "DISMISSED"]);
 
@@ -157,4 +158,24 @@ export function FindingCard({ f }: { f: Finding }) {
       </div>
     </li>
   );
+}
+
+/**
+ * The facilities that matter for this incident: the candidates the agents ranked by road travel time for
+ * the services the report justifies (latest proposal wins). Never every hospital or station in the city.
+ */
+export function relevantFacilities(detail: IncidentDetail | undefined): Poi[] {
+  if (!detail) return [];
+  const mobility = [...detail.proposals].reverse().find((p) => p.agent === "mobility" && p.payload.facility_recommendations);
+  const recs = (mobility?.payload.facility_recommendations as FacilityRecommendation[] | undefined) ?? [];
+  return recs.filter((f) => f.lat != null && f.lon != null && f.kind).map((f) => ({
+    id: f.facility_id, kind: f.kind!, name: f.rank ? `#${f.rank} ${f.name}` : f.name, lat: f.lat!, lon: f.lon!, source: f.source,
+  }));
+}
+
+/** The traffic analysis of one plan version, if the agent produced one for it. */
+export function trafficFor(detail: IncidentDetail | undefined, planVersion: number): TrafficAnalysis | null {
+  const p = [...(detail?.proposals ?? [])].reverse()
+    .find((x) => x.agent === "traffic" && (x.payload as { plan_version?: number }).plan_version === planVersion);
+  return (p?.payload as unknown as TrafficAnalysis | undefined) ?? null;
 }

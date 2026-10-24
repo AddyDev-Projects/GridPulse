@@ -27,7 +27,7 @@ import {
   humanize,
   timeAgo,
 } from "../../components/ui";
-import { COLORS, CityMap, MapLegend } from "../map/CityMap";
+import { COLORS, CityMap, MapLegend, SERVICE_LEGEND, routeTone } from "../map/CityMap";
 import { SourceBadge } from "../incidents/shared";
 
 function ReportQueue() {
@@ -132,19 +132,23 @@ function OverviewMap() {
   const overlay = useOverlay();
   const incidents = useIncidents("current");
   if (!city.data) return <Skeleton className="h-80 w-full" />;
-  const markers = (incidents.data ?? []).filter((i) => i.lat != null && i.lon != null).map((i) => ({
+  // Active incidents only: resolved ones are excluded by the API, dismissed ones here.
+  const markers = (incidents.data ?? []).filter((i) => i.lat != null && i.lon != null && i.status !== "DISMISSED").map((i) => ({
     id: i.id, lat: i.lat!, lon: i.lon!, label: `${i.reference} ${humanize(i.category ?? "other")}`, detail: humanize(i.status),
-    color: i.status === "REPORTED" ? COLORS.incident : i.status === "EXECUTED" ? COLORS.route : "#cfc2ff",
+    // One incident colour (never a service colour); new reports are drawn larger so they stand out.
+    color: COLORS.incident, radius: i.status === "REPORTED" ? 10 : 7,
   }));
   return (
     <div className="grid gap-3">
       <CityMap city={city.data} className="h-80" markers={markers} closures={overlay.data?.closures ?? []}
         signals={overlay.data?.nodes.filter((n) => n.kind === "signal") ?? []}
-        routes={(overlay.data?.active_routes ?? []).map((r) => ({ id: `r${r.id}`, geometry: r.geometry, label: r.name, tone: "route" as const }))} />
+        pois={(overlay.data?.pois ?? []).filter((p) => (overlay.data?.active_routes ?? []).some((r) =>
+          r.name.endsWith(` from ${p.name}`) || r.name.endsWith(` to ${p.name}`)))}
+        routes={(overlay.data?.active_routes ?? []).map((r) => ({ id: `r${r.id}`, geometry: r.geometry, label: r.name, tone: routeTone(r.purpose) }))} />
       <MapLegend items={[
-        { color: COLORS.incident, label: "New report", dot: true },
+        { color: COLORS.incident, label: "Active incident", dot: true },
+        ...SERVICE_LEGEND,
         { color: COLORS.closed, label: "Closed (simulated)", dashed: true },
-        { color: COLORS.route, label: "Active route" },
         { color: COLORS.signalOk, label: "OSM signal (simulated power)", dot: true },
       ]} />
     </div>
@@ -184,7 +188,7 @@ export default function DashboardPage() {
         {s && (
           <dl className="flex gap-6 text-sm">
             {([["New reports", s.new_reports, s.new_reports > 0], ["Awaiting approval", s.pending_approvals, s.pending_approvals > 0],
-              ["Closed segments", s.closures, false], ["City state", `v${s.state_version}`, false]] as const).map(([k, v, hot]) => (
+              ["Closed segments", s.closures, false], ["Active routes", s.active_routes.length, false]] as const).map(([k, v, hot]) => (
               <div key={k}>
                 <dt className="text-xs text-fog-500">{k}</dt>
                 <dd className={cx("font-display text-2xl", hot ? "text-lilac-200" : "text-fog-300")}>{v}</dd>

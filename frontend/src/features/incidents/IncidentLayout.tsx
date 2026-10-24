@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { NavLink, Outlet, useOutletContext, useParams, Link } from "react-router";
-import { ArrowLeft, CheckCircle, CircleNotch, Play, Prohibit } from "@phosphor-icons/react";
-import { useIncident, useIncidentAction, useWorkflow } from "../../hooks/queries";
+import { ArrowLeft, CheckCircle, CircleNotch, FlagCheckered, Play, Prohibit } from "@phosphor-icons/react";
+import { useIncident, useIncidentAction, useResolve, useWorkflow } from "../../hooks/queries";
 import type { IncidentDetail, Workflow } from "../../types/api";
 import { Badge, Button, ErrorState, InlineError, LoadingBlock, StatusBadge, cx, humanize } from "../../components/ui";
 import { SourceBadge, WorkflowStepper } from "./shared";
@@ -58,6 +58,68 @@ function ReviewActions({ wf, detail }: IncidentContext) {
   );
 }
 
+const OPEN_PLAN = ["DRAFT", "REVISION_REQUIRED", "AWAITING_APPROVAL", "APPROVED", "STALE"];
+
+/** Close a finished emergency. The backend withdraws unexecuted plans and keeps the full record. */
+function ResolveAction({ wf, detail }: IncidentContext) {
+  const resolve = useResolve();
+  const [confirming, setConfirming] = useState(false);
+  const [note, setNote] = useState("");
+  const inc = wf.incident;
+  if (!detail || detail.legacy) return null;
+  if (inc.status === "RESOLVED") {
+    return (
+      <div className="panel flex items-start gap-3 p-4 text-sm" role="status">
+        <FlagCheckered size={18} className="mt-0.5 shrink-0 text-ok" />
+        <p className="text-fog-300">
+          Resolved{detail.resolved_by ? ` by ${detail.resolved_by}` : ""}
+          {inc.resolved_at ? ` on ${new Date(inc.resolved_at).toLocaleString()}` : ""}. It no longer appears in the active
+          queue or maps; this record and its audit trail are kept.
+          {inc.resolution_note ? <span className="mt-1 block text-fog-400">Note: {inc.resolution_note}</span> : null}
+        </p>
+      </div>
+    );
+  }
+  if (inc.status === "DISMISSED" || wf.running || (inc.status === "REPORTED" && !inc.run_started_at)) return null;
+  const pending = wf.plans.filter((p) => OPEN_PLAN.includes(p.status));
+  return (
+    <div className="panel grid gap-3 p-4">
+      {confirming ? (
+        <form className="grid gap-2" onSubmit={(e) => {
+          e.preventDefault();
+          if (resolve.isPending) return;
+          resolve.mutate({ id: inc.id, note: note.trim() || undefined, expectedStatus: inc.status },
+            { onSuccess: () => { setConfirming(false); setNote(""); } });
+        }}>
+          <p className="text-sm text-fog-200">Resolve this emergency?</p>
+          <ul className="list-disc pl-5 text-xs text-fog-400">
+            <li>It leaves the active queue and the maps. The report, plans and audit trail are kept.</li>
+            {pending.length > 0 && <li className="text-warn">Unexecuted plan {pending.map((p) => `v${p.version}`).join(", ")} will be withdrawn; nothing is executed.</li>}
+            <li>Simulated road closures stay in place until lifted separately.</li>
+          </ul>
+          <label htmlFor="resolve-note" className="text-sm text-fog-300">Resolution note (optional, internal)</label>
+          <textarea id="resolve-note" rows={2} value={note} onChange={(e) => setNote(e.target.value)} maxLength={500}
+            className="rounded-xl border border-white/10 bg-ink-900 px-3 py-2 text-sm text-fog-100 focus:border-lilac-300/60 focus:outline-none" />
+          <div className="flex gap-2">
+            <Button type="submit" loading={resolve.isPending} disabled={resolve.isPending}>
+              <FlagCheckered size={15} /> Resolve emergency
+            </Button>
+            <Button type="button" variant="ghost" onClick={() => setConfirming(false)} disabled={resolve.isPending}>Cancel</Button>
+          </div>
+        </form>
+      ) : (
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <p className="text-sm text-fog-300">
+            {inc.status === "EXECUTED" ? "Response recorded. Resolve the emergency when it is over." : "Resolve the emergency if it no longer needs a response."}
+          </p>
+          <Button variant="ghost" onClick={() => setConfirming(true)}><FlagCheckered size={15} /> Resolve emergency</Button>
+        </div>
+      )}
+      <InlineError error={resolve.error} />
+    </div>
+  );
+}
+
 export default function IncidentLayout() {
   const { id = "" } = useParams();
   const wf = useWorkflow(id);
@@ -103,6 +165,7 @@ export default function IncidentLayout() {
       </div>
 
       <ReviewActions wf={w} detail={detail.data} />
+      <ResolveAction wf={w} detail={detail.data} />
 
       <nav aria-label="Incident sections" className="flex gap-6 overflow-x-auto border-b border-white/[0.07]">
         <NavLink end to="" className={tab}>Overview</NavLink>

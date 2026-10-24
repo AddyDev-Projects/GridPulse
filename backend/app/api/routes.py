@@ -40,6 +40,7 @@ from app.schemas.api import (
     IncidentOut,
     IncidentSummary,
     NoteBody,
+    ResolveBody,
     OverlayNode,
     OverlayOut,
     PlanOut,
@@ -144,8 +145,7 @@ def _plan_out(db: Session, plan: ResponsePlan, current_state_version: int) -> Pl
     if vrun is None or not vrun.passed:
         blockers.append("Plan has no passing validation.")
     elif vrun.state_version != current_state_version:
-        blockers.append(f"Validated against city state v{vrun.state_version}; the city is now v{current_state_version}. "
-                        "Revalidate first.")
+        blockers.append("The city state has changed since this plan was generated. Revalidate the plan before approving or executing it.")
     actions = []
     for a in plan.actions:
         geometry = segments_geometry = None
@@ -216,7 +216,7 @@ def load_demo_scenario(key: str, body: ScenarioLoad, principal: Principal = Depe
         r = scenario_report(sc)
         inc = create_report(db, mangaluru_graph(), category=r["category"], description=r["description"], lat=r["lat"],
                             lon=r["lon"], indicators=r["indicators"], location_description=r["location_description"],
-                            observed_at=None, source="demo_scenario")
+                            source="demo_scenario")
         audit.record(db, "simulation.demo_report", f"Simulated demo report {inc.reference} created for scenario {sc.code}.",
                      incident_id=inc.id, actor=_actor(principal))
     db.commit()
@@ -282,11 +282,18 @@ def simulation_overlay(db: Session = Depends(get_db)) -> OverlayOut:
 
 # ---- incidents -------------------------------------------------------------------------------
 @router.get("/incidents", response_model=list[IncidentSummary])
-def list_incidents(scope: str = Query("current", pattern="^(current|all)$"), db: Session = Depends(get_db)) -> list[IncidentSummary]:
+def list_incidents(scope: str = Query("current", pattern="^(current|all)$"),
+                   state: str = Query("active", pattern="^(active|resolved|any)$"),
+                   db: Session = Depends(get_db)) -> list[IncidentSummary]:
+    """The operator queue. Resolved emergencies are excluded unless asked for (state=resolved|any)."""
     meta = get_meta(db)
     stmt = select(Incident).order_by(Incident.created_at.desc()).limit(200)
     if scope == "current":
         stmt = stmt.where(Incident.city_id == meta.city_id)
+    if state == "active":
+        stmt = stmt.where(Incident.status != "RESOLVED")
+    elif state == "resolved":
+        stmt = stmt.where(Incident.status == "RESOLVED")
     out = []
     for inc in db.scalars(stmt):
         plan = db.scalars(select(ResponsePlan).where(ResponsePlan.incident_id == inc.id)
@@ -311,6 +318,8 @@ def get_incident(incident_id: uuid.UUID, db: Session = Depends(get_db)) -> Incid
                            .order_by(AgentProposal.created_at)).all()
     verifier = db.get(Operator, inc.verified_by_id) if inc.verified_by_id else None
     dismisser = db.get(Operator, inc.dismissed_by_id) if inc.dismissed_by_id else None
+    resolver = db.get(Operator, inc.resolved_by_id) if inc.resolved_by_id else None
+    selection = next((r for r in reversed(runs) if r.step == "select_services" and r.status == "succeeded"), None)
     hazard_geometry = []
     if ev and ev.output and ev.output.get("geo"):
         hazard_geometry = _geom(ev.output["geo"].get("hazard_segment_ids", [])) or []
@@ -323,7 +332,9 @@ def get_incident(incident_id: uuid.UUID, db: Session = Depends(get_db)) -> Incid
         proposals=[ProposalOut.model_validate(p) for p in proposals],
         is_current_epoch=inc.epoch == meta.epoch, legacy=inc.city_id is None,
         verified_by=verifier.username if verifier else None, dismissed_by=dismisser.username if dismisser else None,
+        resolved_by=resolver.username if resolver else None,
         hazard_geometry=hazard_geometry,
+        services=(selection.output or {}).get("services", []) if selection else [],
     )
 
 
@@ -357,6 +368,17 @@ def dismiss_incident(incident_id: uuid.UUID, body: ReasonBody, principal: Princi
                  actor=_actor(principal), severity="warning", details={"reason": body.reason})
     db.commit()
     return inc
+
+
+@router.post("/incidents/{incident_id}/resolve", response_model=IncidentOut)
+def resolve_incident(incident_id: uuid.UUID, body: ResolveBody, principal: Principal = Depends(require_operator),
+                     db: Session = Depends(get_db)) -> Incident:
+    """Close a finished emergency: it leaves active queues and maps; its record and audit trail remain."""
+    try:
+        return decisions.resolve(db, incident_id, principal.operator, body.note, body.expected_status)
+    except decisions.DecisionError as exc:
+        db.rollback()
+        raise HTTPException(exc.status_code, detail={"code": exc.code, "message": exc.message}) from None
 
 
 @router.post("/incidents/{incident_id}/run", response_model=IncidentOut, status_code=202)

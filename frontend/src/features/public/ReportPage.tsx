@@ -1,10 +1,11 @@
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router";
-import { CheckCircle, Crosshair, Copy, MapPin } from "@phosphor-icons/react";
+import { ArrowCounterClockwise, CheckCircle, Copy, Crosshair, HandPointing, MapPin, X } from "@phosphor-icons/react";
 import { useCity, useSubmitReport } from "../../hooks/queries";
 import { Button, ErrorState, InlineError, Panel, Skeleton, cx, humanize } from "../../components/ui";
 import { CityMap } from "../map/CityMap";
-import type { LatLng, PublicReportReceipt } from "../../types/api";
+import type { City, LatLng, PublicReportReceipt } from "../../types/api";
+import { SpeechInput } from "./SpeechInput";
 
 const CATEGORY_LABEL: Record<string, string> = {
   flood: "Flooding / waterlogging",
@@ -38,11 +39,68 @@ const INDICATOR_LABEL: Record<string, string> = {
   suspect_present: "Person involved may still be present",
 };
 
-function toIsoWithZone(local: string): string | undefined {
-  if (!local) return undefined;
-  const d = new Date(local);
-  return Number.isNaN(d.getTime()) ? undefined : d.toISOString();
+type GeoStatus = "locating" | "detected" | "outside" | "denied" | "unavailable" | "error";
+
+const inCoverage = (city: City | undefined, [lat, lon]: LatLng) => {
+  if (!city) return true;
+  const [s, w, n, e] = city.coverage_bbox;
+  return lat >= s && lat <= n && lon >= w && lon <= e;
+};
+
+/**
+ * One-shot browser geolocation (no background tracking). The position stays in the page until the
+ * report is submitted; a manual pick always wins and is never replaced by a late geolocation result.
+ */
+function useReportLocation(city: City | undefined) {
+  const [raw, setRaw] = useState<LatLng | null>(null);
+  const [manual, setManual] = useState<LatLng | null>(null);
+  const [geoState, setGeoState] = useState<"locating" | "found" | "denied" | "unavailable" | "error">(
+    () => (typeof navigator !== "undefined" && navigator.geolocation ? "locating" : "unavailable"));
+  const [picking, setPicking] = useState(false);
+
+  // One browser request, no watchPosition. Only the async callbacks set state.
+  const request = useCallback(() => {
+    navigator.geolocation?.getCurrentPosition(
+      (pos) => {
+        const p: LatLng = [Number(pos.coords.latitude.toFixed(6)), Number(pos.coords.longitude.toFixed(6))];
+        if (!Number.isFinite(p[0]) || !Number.isFinite(p[1])) return setGeoState("error");
+        setRaw(p);
+        setGeoState("found");
+      },
+      (err) => setGeoState(err.code === 1 ? "denied" : "error"),
+      { enableHighAccuracy: true, timeout: 10_000, maximumAge: 60_000 },
+    );
+  }, []);
+  useEffect(() => { request(); }, [request]);
+  const detect = () => {
+    if (!navigator.geolocation) return;
+    setGeoState("locating");
+    request();
+  };
+
+  // Coverage is judged once both the position and the city's mapped area are known.
+  const outside = raw !== null && city !== undefined && !inCoverage(city, raw);
+  const detected = raw !== null && city !== undefined && !outside ? raw : null;
+  const status: GeoStatus = geoState === "found" ? (city === undefined ? "locating" : outside ? "outside" : "detected") : geoState;
+
+  const pick = useCallback((p: LatLng) => {
+    setManual(p);
+    setPicking(false);
+  }, []);
+  const useDetected = () => { setManual(null); setPicking(false); };
+  const reset = () => { setManual(null); setPicking(false); };
+  // A manual pick always wins; a late geolocation answer only updates `raw`, never `manual`.
+  return { location: manual ?? detected, manual, detected, status, picking, setPicking, pick, useDetected, detect, reset };
 }
+
+const GEO_TEXT: Record<GeoStatus, string> = {
+  locating: "Finding your location… (your browser may ask for permission)",
+  detected: "Using your detected location.",
+  outside: "Your detected location is outside the area GridPulse has mapped. Pick the hazard's location on the map.",
+  denied: "Location permission was not granted. Pick the location on the map.",
+  unavailable: "This browser cannot share its location. Pick the location on the map.",
+  error: "Your location could not be determined. Try again, or pick the location on the map.",
+};
 
 function Receipt({ r, onAnother }: { r: PublicReportReceipt; onAnother: () => void }) {
   const [copied, setCopied] = useState(false);
@@ -81,30 +139,22 @@ export default function ReportPage() {
   const [description, setDescription] = useState("");
   const [indicators, setIndicators] = useState<string[]>([]);
   const [where, setWhere] = useState("");
-  const [observed, setObserved] = useState("");
   const [website, setWebsite] = useState("");
-  const [picked, setPicked] = useState<LatLng | null>(null);
-  const [geoError, setGeoError] = useState<string | null>(null);
+  const loc = useReportLocation(city.data);
+  const picked = loc.location;
   const [touched, setTouched] = useState(false);
+  const appendSpeech = useCallback((text: string) => {
+    setDescription((d) => (d.trim() ? `${d.trimEnd()} ${text}` : text).slice(0, 2000));
+  }, []);
 
   if (city.isError) return <ErrorState error={city.error} onRetry={() => city.refetch()} />;
   if (submit.data) {
-    return <Receipt r={submit.data} onAnother={() => { submit.reset(); setDescription(""); setIndicators([]); setPicked(null); setTouched(false); }} />;
+    return <Receipt r={submit.data} onAnother={() => { submit.reset(); setDescription(""); setIndicators([]); loc.reset(); setTouched(false); }} />;
   }
 
   const descError = description.trim().length < 10 ? "Describe what you see in at least 10 characters." : null;
-  const pinError = picked ? null : "Tap the map to mark where it is.";
+  const pinError = picked ? null : "Choose a location: allow location access, or pick it on the map.";
   const canSubmit = !descError && !pinError;
-
-  const useMyLocation = () => {
-    setGeoError(null);
-    if (!navigator.geolocation) return setGeoError("Your browser cannot share its location. Tap the map instead.");
-    navigator.geolocation.getCurrentPosition(
-      (p) => setPicked([Number(p.coords.latitude.toFixed(6)), Number(p.coords.longitude.toFixed(6))]),
-      () => setGeoError("Location permission was not granted. Tap the map instead."),
-      { enableHighAccuracy: true, timeout: 10_000 },
-    );
-  };
 
   return (
     <div className="grid gap-6">
@@ -125,7 +175,7 @@ export default function ReportPage() {
             if (!canSubmit || !picked) return;
             submit.mutate({
               category, description: description.trim(), lat: picked[0], lon: picked[1], indicators,
-              location_description: where.trim() || undefined, observed_at: toIsoWithZone(observed), website: website || undefined,
+              location_description: where.trim() || undefined, website: website || undefined,
             });
           }}
         >
@@ -143,7 +193,10 @@ export default function ReportPage() {
           </fieldset>
 
           <div className="grid gap-2">
-            <label htmlFor="description" className="text-sm text-fog-300">Describe what you see</label>
+            <div className="flex flex-wrap items-end justify-between gap-2">
+              <label htmlFor="description" className="text-sm text-fog-300">Describe what you see</label>
+              <SpeechInput onText={appendSpeech} describedBy="description-help" />
+            </div>
             <textarea id="description" rows={4} maxLength={2000} value={description} onChange={(e) => setDescription(e.target.value)}
               aria-invalid={touched && !!descError} aria-describedby="description-help"
               className="w-full resize-y rounded-xl border border-white/10 bg-ink-900 px-4 py-3 text-[14.5px] text-fog-100 focus:border-lilac-300/60 focus:outline-none" />
@@ -165,17 +218,11 @@ export default function ReportPage() {
             </div>
           </fieldset>
 
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div className="grid gap-2">
-              <label htmlFor="where" className="text-sm text-fog-300">Landmark <span className="text-fog-500">(optional)</span></label>
-              <input id="where" value={where} maxLength={200} onChange={(e) => setWhere(e.target.value)}
-                className="h-11 rounded-xl border border-white/10 bg-ink-900 px-4 text-sm text-fog-100 focus:border-lilac-300/60 focus:outline-none" />
-            </div>
-            <div className="grid gap-2">
-              <label htmlFor="observed" className="text-sm text-fog-300">When did you see it? <span className="text-fog-500">(optional)</span></label>
-              <input id="observed" type="datetime-local" value={observed} onChange={(e) => setObserved(e.target.value)}
-                className="h-11 rounded-xl border border-white/10 bg-ink-900 px-4 text-sm text-fog-100 focus:border-lilac-300/60 focus:outline-none [color-scheme:dark]" />
-            </div>
+          <div className="grid gap-2">
+            <label htmlFor="where" className="text-sm text-fog-300">Landmark <span className="text-fog-500">(optional)</span></label>
+            <input id="where" value={where} maxLength={200} onChange={(e) => setWhere(e.target.value)}
+              className="h-11 rounded-xl border border-white/10 bg-ink-900 px-4 text-sm text-fog-100 focus:border-lilac-300/60 focus:outline-none" />
+            <p className="text-xs text-fog-500">The time is recorded automatically when you send the report.</p>
           </div>
 
           {/* Honeypot for bots: hidden from people and assistive tech. */}
@@ -184,12 +231,14 @@ export default function ReportPage() {
             <input id="website" tabIndex={-1} autoComplete="off" value={website} onChange={(e) => setWebsite(e.target.value)} />
           </div>
 
-          <div className="grid gap-2 rounded-xl bg-white/[0.03] p-3 text-sm">
+          <div className="grid gap-1 rounded-xl bg-white/[0.03] p-3 text-sm" data-testid="location-summary">
             <p className={cx("flex items-center gap-2", picked ? "text-fog-300" : touched ? "text-bad" : "text-fog-400")}>
               <MapPin size={16} />
-              {picked ? `Location set: ${picked[0].toFixed(5)}, ${picked[1].toFixed(5)}` : pinError}
+              {picked
+                ? `${loc.manual ? "Location picked on the map" : "Detected location"}: ${picked[0].toFixed(5)}, ${picked[1].toFixed(5)}`
+                : pinError}
             </p>
-            {geoError && <p className="text-xs text-warn">{geoError}</p>}
+            <p className="text-xs text-fog-500">Your location is only sent when you send the report.</p>
           </div>
 
           <InlineError error={submit.error} />
@@ -199,15 +248,37 @@ export default function ReportPage() {
         </form>
 
         <div className="order-first grid min-w-0 content-start gap-3 lg:order-none">
-          <div className="flex items-center justify-between gap-3">
-            <p className="text-sm text-fog-300">Tap the map where the hazard is</p>
-            <Button type="button" variant="ghost" className="h-9 px-4" onClick={useMyLocation}>
-              <Crosshair size={15} /> Use my location
-            </Button>
+          <div className="grid gap-2">
+            <p role="status" aria-live="polite" className={cx("text-sm",
+              loc.manual ? "text-fog-300" : loc.status === "detected" ? "text-ok" : loc.status === "locating" ? "text-fog-400" : "text-warn")}>
+              {loc.picking ? "Click the map where the hazard is." : loc.manual ? "Using the location you picked on the map." : GEO_TEXT[loc.status]}
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {loc.picking ? (
+                <Button type="button" variant="ghost" className="h-9 px-4" onClick={() => loc.setPicking(false)}>
+                  <X size={15} /> Cancel picking
+                </Button>
+              ) : (
+                <Button type="button" variant="ghost" className="h-9 px-4" onClick={() => loc.setPicking(true)}>
+                  <HandPointing size={15} /> {loc.manual ? "Pick a different location" : "Pick location on map"}
+                </Button>
+              )}
+              {loc.manual && loc.detected && !loc.picking && (
+                <Button type="button" variant="ghost" className="h-9 px-4" onClick={loc.useDetected}>
+                  <ArrowCounterClockwise size={15} /> Use detected location
+                </Button>
+              )}
+              {!loc.manual && !loc.picking && (loc.status === "error" || loc.status === "denied") && (
+                <Button type="button" variant="ghost" className="h-9 px-4" onClick={loc.detect}>
+                  <Crosshair size={15} /> Try detecting again
+                </Button>
+              )}
+            </div>
           </div>
           {city.data ? (
-            <CityMap city={city.data} className="h-[360px] sm:h-[520px]" picked={picked} onPick={setPicked}
-              focus={picked ? [picked] : null} ariaLabel="Map of Mangaluru: tap to choose the report location" />
+            <CityMap city={city.data} className={cx("h-[360px] sm:h-[520px]", loc.picking && "ring-2 ring-lilac-300")}
+              picked={picked} onPick={loc.picking ? loc.pick : undefined} focus={picked ? [picked] : null}
+              ariaLabel={loc.picking ? "Map of Mangaluru: click to choose the report location" : "Map of Mangaluru"} />
           ) : (
             <Skeleton className="h-[360px] w-full sm:h-[520px]" />
           )}

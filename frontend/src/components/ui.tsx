@@ -43,6 +43,7 @@ const STATUS_TONE: Record<string, Tone> = {
   AWAITING_APPROVAL: "accent",
   APPROVED: "ok",
   EXECUTED: "ok",
+  RESOLVED: "ok",
   REJECTED: "neutral",
   ESCALATED: "bad",
   NO_SAFE_PLAN: "bad",
@@ -186,6 +187,11 @@ export function timeAgo(iso: string) {
   if (s < 3600) return `${Math.round(s / 60)} min ago`;
   if (s < 86400) return `${Math.round(s / 3600)} h ago`;
   return new Date(iso).toLocaleDateString();
+}
+
+/** Full local date and time, e.g. "24 Oct 2026, 8:11 pm", for records people may refer back to. */
+export function when(iso: string) {
+  return new Date(iso).toLocaleString([], { day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit" });
 }
 
 export function clock(iso: string) {

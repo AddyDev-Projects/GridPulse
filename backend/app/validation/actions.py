@@ -23,7 +23,8 @@ class SegmentsParams(_Strict):
 
 
 class RouteParams(_Strict):
-    purpose: Literal["emergency_access", "medical_transfer"]
+    purpose: Literal["emergency_access", "medical_transfer", "police_response"]
+    service: Literal["fire_rescue", "ambulance", "police"] | None = None  # None on plans made before service selection
     name: str = Field(max_length=160)
     origin: str = Field(max_length=32)
     origin_label: str = Field(max_length=200)
@@ -72,6 +73,8 @@ ACTION_TYPES: dict[str, ActionType] = {
 }
 
 ROUTE_ACTIONS = ("designate_response_route",)
+# Which responder service each route purpose belongs to (see app.agents.services).
+ROUTE_SERVICE = {"emergency_access": "fire_rescue", "police_response": "police", "medical_transfer": "ambulance"}
 
 
 def validate_params(action_type: str, params: dict[str, Any]) -> str | None:

@@ -128,7 +128,6 @@ def test_police_category_is_accepted_and_recent_feed_is_limited_and_sanitized(an
             lon=A.lon,
             indicators=[],
             location_description=None,
-            observed_at=None,
             source="citizen_portal",
         )
         inc.created_at = base - timedelta(minutes=6 - i)

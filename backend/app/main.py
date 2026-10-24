@@ -22,7 +22,7 @@ from app.simulation.repository import ScenarioError, SimulationNotInitialized, e
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 log = logging.getLogger("gridpulse")
 
-TERMINAL = ("EXECUTED", "REJECTED", "ESCALATED", "NO_SAFE_PLAN", "FAILED", "AWAITING_APPROVAL", "APPROVED", "DISMISSED")
+TERMINAL = ("EXECUTED", "REJECTED", "ESCALATED", "NO_SAFE_PLAN", "FAILED", "AWAITING_APPROVAL", "APPROVED", "DISMISSED", "RESOLVED")
 
 
 def startup_checks() -> None:

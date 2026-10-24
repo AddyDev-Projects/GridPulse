@@ -8,7 +8,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from app.schemas.agents import EvidenceAssessment, IncidentCategory, SentinelAssessment, SeverityIndicator
+from app.schemas.agents import EvidenceAssessment, IncidentCategory, SentinelAssessment, ServiceRequirement, SeverityIndicator
 
 
 class ORM(BaseModel):
@@ -24,7 +24,11 @@ def _clean(v: str | None) -> str | None:
 
 
 class PublicReportCreate(BaseModel):
-    """Anonymous citizen report. No identity is collected."""
+    """Anonymous citizen report. No identity is collected.
+
+    There is no time field: the server records when the report was accepted (UTC) and treats that as
+    when the emergency was observed. A client-supplied time is rejected (extra="forbid").
+    """
 
     model_config = ConfigDict(extra="forbid")
 
@@ -33,7 +37,6 @@ class PublicReportCreate(BaseModel):
     lat: float = Field(ge=-90, le=90)
     lon: float = Field(ge=-180, le=180)
     location_description: str | None = Field(default=None, max_length=200)
-    observed_at: datetime | None = None
     indicators: list[SeverityIndicator] = Field(default_factory=list, max_length=8)
     website: str | None = Field(default=None, max_length=200, description="Honeypot. Must be empty.")
 
@@ -74,6 +77,14 @@ class NoteBody(BaseModel):
     @classmethod
     def strip_controls(cls, v: str | None) -> str | None:
         return _clean(v)
+
+
+class ResolveBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    note: str | None = Field(default=None, max_length=500)
+    # The status the operator saw; a mismatch means someone else changed the incident meanwhile.
+    expected_status: str | None = Field(default=None, max_length=24)
 
 
 class ReasonBody(BaseModel):
@@ -121,6 +132,8 @@ class IncidentOut(ORM):
     verification_note: str | None
     dismissed_at: datetime | None
     dismissal_reason: str | None
+    resolved_at: datetime | None = None
+    resolution_note: str | None = None
     run_started_at: datetime | None
     run_finished_at: datetime | None
     created_at: datetime
@@ -178,7 +191,9 @@ class IncidentDetail(BaseModel):
     legacy: bool
     verified_by: str | None = None
     dismissed_by: str | None = None
+    resolved_by: str | None = None
     hazard_geometry: list[list[list[float]]] = []
+    services: list[ServiceRequirement] = []
 
 
 class ActionOut(ORM):

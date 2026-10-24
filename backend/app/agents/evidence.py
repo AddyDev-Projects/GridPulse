@@ -22,6 +22,8 @@ from app.schemas.agents import EvidenceAssessment, HazardEvidence, IncidentGeo, 
 from app.simulation.state import CitySnapshot
 
 ACTIVE_SENSOR_STATUSES = ("online", "degraded")
+# Categories whose hazard can involve the simulated power network (vault flooding, fire, outage).
+UTILITY_HAZARD_CATEGORIES = {"flood", "power_outage", "fire", "rescue", "other"}
 CATEGORY_HAZARD = {
     "flood": "road_flooding",
     "fire": "fire",
@@ -110,7 +112,10 @@ def assess_evidence(
         _apply_confirmation(location_hazard, confirmation)
 
     infra = []
-    zones = set(zone_obs)
+    # Zone (utility) hazards belong to this incident only when its category concerns that kind of hazard
+    # or an electrical hazard was reported. A theft or a medical call in a flooded zone must not inherit
+    # the zone's utility actions.
+    zones = set(zone_obs) if category in UTILITY_HAZARD_CATEGORIES else set()
     if electrical_hazard_reported and geo is not None and geo.zone_id:
         zones.add(geo.zone_id)
     for zid in sorted(zones):

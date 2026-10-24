@@ -47,6 +47,10 @@ SENSITIVE_PUBLIC_CATEGORIES = {
 }
 
 
+# Closed by an operator: resolved after a response, or dismissed after review. Not shown as current reports.
+INACTIVE_PUBLIC_STATUSES = ("RESOLVED", "DISMISSED")
+
+
 def public_category(category: str | None) -> str:
     value = category or "other"
     return "police_assistance" if value in SENSITIVE_PUBLIC_CATEGORIES else value
@@ -83,7 +87,7 @@ def submit_report(body: PublicReportCreate, request: Request, db: Session = Depe
     try:
         inc = create_report(db, mangaluru_graph(), category=body.category, description=body.description, lat=body.lat,
                             lon=body.lon, indicators=list(body.indicators), location_description=body.location_description,
-                            observed_at=body.observed_at, source="citizen_portal", client_key_hash=key)
+                            source="citizen_portal", client_key_hash=key)
     except ReportError as exc:
         db.rollback()
         raise HTTPException(exc.status, detail={"code": exc.code, "message": exc.message}) from None
@@ -115,7 +119,7 @@ def public_incidents(db: Session = Depends(get_db)) -> list[PublicIncident]:
     meta = get_meta(db)
     since = utcnow() - timedelta(days=7)
     rows = db.scalars(select(Incident).where(
-        Incident.city_id == meta.city_id, Incident.created_at >= since, Incident.status != "DISMISSED",
+        Incident.city_id == meta.city_id, Incident.created_at >= since, Incident.status.not_in(INACTIVE_PUBLIC_STATUSES),
         (Incident.verified_at.is_not(None)) | (Incident.status == "EXECUTED"),
     ).order_by(Incident.updated_at.desc()).limit(200)).all()
     out = []
@@ -130,19 +134,22 @@ def public_incidents(db: Session = Depends(get_db)) -> list[PublicIncident]:
 
 @router.get("/recent-incidents", response_model=list[PublicRecentIncident])
 def recent_public_incidents(db: Session = Depends(get_db)) -> list[PublicRecentIncident]:
-    """Return five newest citizen reports with only coarse, public-safe fields."""
+    """Return the five newest *active* citizen reports with only coarse, public-safe fields.
+
+    Eligibility is filtered in the query, before ordering and the limit, so a resolved or dismissed
+    report never takes a slot: older active reports fill the list instead.
+    """
     meta = get_meta(db)
     rows = db.scalars(
         select(Incident)
-        .where(Incident.city_id == meta.city_id, Incident.source == "citizen_portal")
+        .where(Incident.city_id == meta.city_id, Incident.source == "citizen_portal",
+               Incident.reference.is_not(None), Incident.status.not_in(INACTIVE_PUBLIC_STATUSES))
         .order_by(Incident.created_at.desc(), Incident.id.desc())
         .limit(5)
     ).all()
     graph = mangaluru_graph()
     result: list[PublicRecentIncident] = []
     for inc in rows:
-        if inc.reference is None:
-            continue
         category = inc.category or "other"
         sensitive = category in SENSITIVE_PUBLIC_CATEGORIES
         segment = graph.segments.get(inc.segment_id) if inc.segment_id else None

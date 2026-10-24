@@ -14,7 +14,10 @@ def configure_engine(url: str | None = None) -> Engine:
     global _engine, _SessionLocal
     if _engine is not None:
         _engine.dispose()
-    _engine = create_engine(url or get_settings().database_url, pool_pre_ping=True, future=True)
+    # Sessions run in UTC so every timestamptz comes back (and is serialised by the API) as UTC, whatever
+    # the server's or the database's local time zone. Stored values are absolute instants either way.
+    _engine = create_engine(url or get_settings().database_url, pool_pre_ping=True, future=True,
+                            connect_args={"options": "-c timezone=UTC"})
     _SessionLocal = sessionmaker(bind=_engine, expire_on_commit=False, autoflush=False)
     return _engine
 

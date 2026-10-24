@@ -21,6 +21,8 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from app.agents import grid, mobility
+from app.agents.services import ServicePlan
+from app.agents.traffic import SENSITIVE_CATEGORIES
 from app.schemas.agents import EvidenceAssessment, IncidentGeo, SentinelAssessment
 from app.simulation.state import ActionSpec, CitySnapshot, apply_actions
 from app.validation.actions import ACTION_TYPES, ROUTE_ACTIONS
@@ -83,6 +85,9 @@ def revise(
     evidence: EvidenceAssessment,
     geo: IncidentGeo,
     indicators: list[str],
+    *,
+    services: ServicePlan | None = None,
+    category: str | None = None,
 ) -> RevisionOutcome | RevisionFailure:
     blocking = result.blocking()
     triggered = [{"rule_id": f.rule_id, "title": f.title, "action_seq": f.action_seq} for f in blocking]
@@ -123,10 +128,12 @@ def revise(
                 "dispatch_field_verification", loc, {"question": f"Confirm the reported hazard and passability at {name}."},
                 "Sentinel requests ground truth because the hazard is not corroborated."), "sentinel"))
             next_seq += 1
-        if loc and not any(a.action_type == "issue_public_advisory" for a in new):
+        # No public advisory for crime, violence or medical reports: it would broadcast a sensitive allegation.
+        if loc and (category or assessment.category) not in SENSITIVE_CATEGORIES \
+                and not any(a.action_type == "issue_public_advisory" for a in new):
             new.append(make_action(next_seq, mobility.ProposedAction(
                 "issue_public_advisory", loc,
-                {"message": f"Possible {assessment.category.replace('_', ' ')} reported near {name}. Avoid the area "
+                {"message": f"Possible {(category or assessment.category).replace('_', ' ')} reported near {name}. Avoid the area "
                             "if possible while it is verified. (Simulation)"},
                 "Low-impact public warning while the report is verified."), "coordinator"))
             next_seq += 1
@@ -151,7 +158,7 @@ def revise(
         dark_on_routes = sorted({s for a in route_actions for nid in a.params["node_path"]
                                  for s in projected.signals_controlling(nid) if projected.nodes[s].status == "dark"})
 
-        mp = mobility.propose(snapshot, assessment, evidence, geo, indicators,
+        mp = mobility.propose(snapshot, assessment, evidence, geo, indicators, services=services,
                               exclude_nodes=dark_junctions, exclude_edges=closed)
         contributions.append(AgentContribution(
             "mobility", "revise_route",
