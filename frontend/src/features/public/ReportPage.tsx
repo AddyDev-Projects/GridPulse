@@ -277,7 +277,7 @@ export default function ReportPage() {
           </div>
           {city.data ? (
             <CityMap city={city.data} className={cx("h-[360px] sm:h-[520px]", loc.picking && "ring-2 ring-lilac-300")}
-              picked={picked} onPick={loc.picking ? loc.pick : undefined} focus={picked ? [picked] : null}
+              picked={picked} onPick={loc.picking ? loc.pick : undefined} focus={picked ? [picked] : null} scrollZoom
               ariaLabel={loc.picking ? "Map of Mangaluru: click to choose the report location" : "Map of Mangaluru"} />
           ) : (
             <Skeleton className="h-[360px] w-full sm:h-[520px]" />

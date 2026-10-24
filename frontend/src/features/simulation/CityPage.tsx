@@ -44,7 +44,7 @@ export default function CityPage() {
           ))}
         </fieldset>
         {city.data ? (
-          <CityMap city={city.data} className="h-[560px]" showGraph={on.graph}
+          <CityMap city={city.data} className="h-[560px]" showGraph={on.graph} scrollZoom
             markers={on.incidents ? (incidents.data ?? []).filter((i) => i.lat != null && i.status !== "DISMISSED").map((i) => ({
               id: i.id, lat: i.lat!, lon: i.lon!, label: i.reference ?? "report", detail: humanize(i.status) })) : []}
             closures={on.closures ? o?.closures ?? [] : []}

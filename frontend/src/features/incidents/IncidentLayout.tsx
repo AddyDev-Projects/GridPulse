@@ -178,7 +178,11 @@ export default function IncidentLayout() {
         <NavLink to="audit" className={tab}>Audit trail</NavLink>
       </nav>
 
-      <Outlet context={{ wf: w, detail: detail.data } satisfies IncidentContext} />
+      {/* Keyed by incident: tab state (selected revision, open confirmations, notes) never carries over
+          from a previously viewed incident. */}
+      <div key={inc.id} className="contents">
+        <Outlet context={{ wf: w, detail: detail.data } satisfies IncidentContext} />
+      </div>
     </div>
   );
 }

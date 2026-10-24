@@ -2,7 +2,8 @@ import { useState } from "react";
 import { Link } from "react-router";
 import { ShieldCheck, ShieldWarning, Lightning, ArrowsClockwise, CheckCircle, Prohibit } from "@phosphor-icons/react";
 import { useIncidentContext } from "./IncidentLayout";
-import { ActionRow, FindingCard } from "./shared";
+import { FindingCard } from "./shared";
+import { ActionPlan } from "./ActionPlan";
 import { useDecision, useExecute, useMe, useRevalidate } from "../../hooks/queries";
 import { Badge, Button, Empty, InlineError, Panel, StatusBadge, clock, cx } from "../../components/ui";
 import type { Plan } from "../../types/api";
@@ -64,7 +65,7 @@ function ExecutionResult({ plan }: { plan: Plan }) {
 }
 
 export default function ApprovalTab() {
-  const { wf } = useIncidentContext();
+  const { wf, detail } = useIncidentContext();
   const plan = wf.plans[wf.plans.length - 1];
   const me = useMe();
   const [note, setNote] = useState("");
@@ -80,7 +81,6 @@ export default function ApprovalTab() {
   const decisionBody = { plan_version: plan.version, content_hash: plan.content_hash, note: note.trim() || undefined };
   const lastError = approve.error ?? reject.error ?? execute.error ?? revalidate.error;
   const activeApproval = plan.approvals.find((a) => a.decision === "approved" && a.status === "active");
-  const blocking = plan.latest_validation?.findings.filter((f) => f.severity !== "info") ?? [];
   const escalated = plan.status === "ESCALATED" || plan.status === "INVALID";
 
   const act = (kind: "approve" | "reject" | "execute") => {
@@ -108,17 +108,10 @@ export default function ApprovalTab() {
 
         <Panel title="Plan under review" action={<StatusBadge status={plan.status} />}>
           <PlanIdentity plan={plan} />
-          <p className="mt-4 text-sm text-fog-400">{plan.summary}</p>
-          <ul className="mt-4 grid gap-2">
-            {plan.actions.map((a) => <ActionRow key={a.seq} a={a} />)}
-          </ul>
+          <div className="mt-5">
+            <ActionPlan plan={plan} incident={wf.incident} unknowns={detail?.assessment?.missing_information ?? []} />
+          </div>
         </Panel>
-
-        {blocking.length > 0 && !escalated && (
-          <Panel title="Risks and warnings to acknowledge">
-            <ul className="grid gap-2">{blocking.map((f) => <FindingCard key={f.id} f={f} />)}</ul>
-          </Panel>
-        )}
       </div>
 
       <div className="lg:col-span-5 min-w-0">

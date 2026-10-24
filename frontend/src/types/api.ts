@@ -305,12 +305,44 @@ export interface FacilityRecommendation {
 
 export type ResponderType = "fire_rescue" | "ambulance" | "police";
 
+export type DepartmentStatus = "required" | "recommended" | "conditional" | "not_justified";
+
 export interface ServiceRequirement {
   service: ResponderType;
-  status: "required" | "optional" | "not_needed";
+  /** "optional" / "not_needed" appear only on records made before the four-status model. */
+  status: DepartmentStatus | "optional" | "not_needed";
+  basis?: "reported" | "inference" | "rule";
   rationale: string;
   evidence: string[];
-  uncertainty: string | null;
+  unknowns?: string[];
+  expected_action?: string | null;
+  uncertainty?: string | null;
+}
+
+export interface RouteLeg {
+  service: string;
+  leg: "to_incident" | "to_hospital";
+  purpose: string | null;
+  status: "planned" | "unavailable" | "withheld";
+  reason?: string | null;
+  action_seq?: number | null;
+  name?: string | null;
+  origin_label?: string | null;
+  destination_label?: string | null;
+  length_m?: number | null;
+  travel_s?: number | null;
+}
+
+export interface Department {
+  service: ResponderType;
+  label: string;
+  status: DepartmentStatus;
+  basis: "reported" | "inference" | "rule";
+  rationale: string;
+  evidence: string[];
+  unknowns: string[];
+  expected_action: string | null;
+  routes: RouteLeg[];
 }
 
 export interface TrafficRouteAssessment {
@@ -569,6 +601,7 @@ export interface Plan {
   current_state_version: number;
   approvable: boolean;
   approval_blockers: string[];
+  departments?: Department[];
 }
 
 export interface Transition {

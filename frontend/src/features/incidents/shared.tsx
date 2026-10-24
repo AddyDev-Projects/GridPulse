@@ -1,4 +1,5 @@
-import type { FacilityRecommendation, Finding, IncidentDetail, PlanAction, Poi, TrafficAnalysis, Workflow } from "../../types/api";
+import type { FacilityRecommendation, Finding, IncidentDetail, Plan, PlanAction, Poi, TrafficAnalysis, Workflow } from "../../types/api";
+import type { RouteTone as MapRouteTone } from "../map/mapTheme";
 import { AGENT_LABEL, Badge, SeverityIcon, cx } from "../../components/ui";
 import { CheckCircle, Circle, XCircle } from "@phosphor-icons/react";
 
@@ -119,6 +120,7 @@ const RULE_NAME: Record<string, string> = {
   R6_EVIDENCE: "R6 Evidence",
   R7_UNRESOLVED_CONFLICT: "R7 Unresolved",
   R8_TRAFFIC_DATA: "R8 Traffic data",
+  R9_DEPARTMENTS: "R9 Departments",
 };
 
 export function FindingCard({ f }: { f: Finding }) {
@@ -178,4 +180,39 @@ export function trafficFor(detail: IncidentDetail | undefined, planVersion: numb
   const p = [...(detail?.proposals ?? [])].reverse()
     .find((x) => x.agent === "traffic" && (x.payload as { plan_version?: number }).plan_version === planVersion);
   return (p?.payload as unknown as TrafficAnalysis | undefined) ?? null;
+}
+
+const ROUTE_DEPT: Record<string, string> = { emergency_access: "fire_rescue", police_response: "police", medical_transfer: "ambulance" };
+const DEPT_NAME: Record<string, string> = { fire_rescue: "Fire & rescue", police: "Police", ambulance: "Medical" };
+
+/**
+ * Map layers for one plan's routes: one line per route in its department's colour and pattern, plus a
+ * start and an end marker for each, and the departments whose route could not be drawn. Only routes the
+ * plan actually contains are returned, so another incident's or plan's routes can never leak in.
+ */
+export function planRouteLayers(plan: Plan | undefined, tone: (purpose: string) => MapRouteTone, colors: Record<string, string>) {
+  const routes: { id: string; geometry: [number, number][]; tone: MapRouteTone; label: string }[] = [];
+  const markers: { id: string; lat: number; lon: number; label: string; detail: string; color: string; radius: number }[] = [];
+  const services = new Set<string>();
+  const missing: string[] = [];
+  for (const a of plan?.actions ?? []) {
+    if (a.action_type !== "designate_response_route") continue;
+    const svc = (a.params.service as string | undefined) ?? ROUTE_DEPT[a.params.purpose as string] ?? "fire_rescue";
+    const name = DEPT_NAME[svc] ?? svc;
+    if (!a.geometry || a.geometry.length < 2) {
+      missing.push(`${name}: route #${a.seq} has no drawable geometry`);
+      continue;
+    }
+    services.add(svc);
+    const color = colors[svc];
+    routes.push({ id: `p${plan!.version}-${a.seq}`, geometry: a.geometry, tone: tone(a.params.purpose as string),
+      label: `${name}: ${a.params.name as string}` });
+    const [s, e] = [a.geometry[0], a.geometry[a.geometry.length - 1]];
+    markers.push({ id: `start-${a.seq}`, lat: s[0], lon: s[1], label: `${name} start`, detail: String(a.params.origin_label ?? ""), color, radius: 6 });
+    markers.push({ id: `end-${a.seq}`, lat: e[0], lon: e[1], label: `${name} end`, detail: String(a.params.destination_label ?? ""), color, radius: 6 });
+  }
+  for (const d of plan?.departments ?? []) {
+    for (const leg of d.routes) if (leg.status !== "planned") missing.push(`${d.label}: ${leg.status === "withheld" ? "route withheld" : "no valid road route"} (${leg.leg === "to_hospital" ? "incident to hospital" : "to the incident"})`);
+  }
+  return { routes, markers, services, missing };
 }

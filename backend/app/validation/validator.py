@@ -13,6 +13,8 @@ Rules
   R7 UNRESOLVED_CONFLICT  added by the coordinator when revisions are exhausted
   R8 TRAFFIC_DATA         warnings on the traffic picture: no live feed, a failed analysis, or an
                           analysis made for another plan or city-state version
+  R9 DEPARTMENTS          a route only for a department the incident requires (blocking); missing
+                          reasons and routes that could not be calculated are reported
 """
 
 from __future__ import annotations
@@ -20,6 +22,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
+from app.agents.services import DEPARTMENT_LABEL, PURPOSE_SERVICE, plan_departments
 from app.schemas.agents import SUPPORTING_STATUSES, EvidenceAssessment
 from app.simulation.state import ActionSpec, CitySnapshot, apply_actions
 from app.validation.actions import ACTION_TYPES, ROUTE_ACTIONS, ROUTE_SERVICE, validate_params
@@ -90,6 +93,8 @@ def validate_plan(
     expected_state_version: int | None = None,
     traffic: dict[str, Any] | None = None,
     plan_version: int | None = None,
+    departments: list[dict[str, Any]] | None = None,
+    route_legs: list[dict[str, Any]] | None = None,
 ) -> ValidationResult:
     findings: list[Finding] = []
 
@@ -252,6 +257,45 @@ def validate_plan(
                     "R8_TRAFFIC_DATA", "info", f"No alternative for {ra['name']}",
                     ra["alternative_note"], "If this route becomes blocked there is no fallback; monitor it.",
                     agent="traffic", evidence={"purpose": ra.get("purpose")}))
+
+    # R9 — departments ------------------------------------------------------------------------
+    # Hard rule: a route (simulated dispatch) only for a department the incident requires. Missing reasons
+    # and routes that could not be calculated are surfaced, never hidden.
+    if departments is not None:
+        depts = plan_departments(departments, route_legs or [], valid)
+        status = {d["service"]: d["status"] for d in depts}
+        for r in routes:
+            svc = r.params.get("service") or PURPOSE_SERVICE.get(r.params["purpose"])
+            if status.get(svc) != "required":
+                findings.append(Finding(
+                    "R9_DEPARTMENTS", "blocking", f"{DEPARTMENT_LABEL.get(svc, svc)} is not justified for this incident",
+                    f"Action #{r.seq} routes {DEPARTMENT_LABEL.get(svc, svc)}, but the department assessment marks it "
+                    f"{(status.get(svc) or 'not assessed').replace('_', ' ')}.",
+                    "Remove the route, or record evidence that makes the department required.",
+                    agent=r.proposed_by, action_seq=r.seq, evidence={"service": svc, "status": status.get(svc)}))
+        for d in depts:
+            if d["status"] != "required":
+                continue
+            if not (d.get("rationale") or "").strip():
+                findings.append(Finding("R9_DEPARTMENTS", "warning", f"{d['label']}: reason not provided — review required",
+                                        "The department is required but no justification was recorded.",
+                                        "Review the report before approving.", agent="coordinator",
+                                        evidence={"service": d["service"]}))
+            for leg in d["routes"]:
+                if leg["status"] == "planned":
+                    continue
+                if d["service"] == "ambulance" and leg["leg"] == "to_incident":
+                    findings.append(Finding("R9_DEPARTMENTS", "info", "Ambulance starting point unknown", leg["reason"],
+                                            "Confirm where the ambulance will come from through authorized channels.",
+                                            agent="mobility", evidence=leg))
+                elif leg["status"] == "withheld":
+                    findings.append(Finding("R9_DEPARTMENTS", "info", f"{d['label']} route withheld", leg["reason"],
+                                            None, agent="coordinator", evidence=leg))
+                else:
+                    findings.append(Finding("R9_DEPARTMENTS", "warning",
+                                            f"No valid road route could be calculated for {d['label']}", leg["reason"],
+                                            "Plan this department's access manually; the plan does not include it.",
+                                            agent="mobility", evidence=leg))
 
     # R2 — infrastructure dependencies --------------------------------------------------------
     utility_actions = [a for a in valid if ACTION_TYPES[a.action_type].owner == "grid"]

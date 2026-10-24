@@ -448,11 +448,15 @@ describe("incident page", () => {
       if (url.endsWith("/simulation/overlay")) return json({ nodes: [], zones: [], closures: [], active_routes: [], pois: [], state_version: 3, simulated_layers: [] });
     });
     await renderIncident();
-    const panel = (await screen.findByText("Response services")).closest("section")!;
+    const panel = (await screen.findByText("Response departments")).closest("section")!;
     const police = within(panel).getByText("Police").closest("li")!;
-    expect(within(police).getByText("required")).toBeInTheDocument();
-    const fire = within(panel).getByText("Fire & rescue").closest("li")!;
-    expect(within(fire).getByText("not needed")).toBeInTheDocument();
+    expect(within(police).getByText("Required")).toBeInTheDocument();
+    expect(within(police).getByText(/security or criminal incident/)).toBeInTheDocument();
+    // Records made before the four-status model ("not_needed") read as "Not justified": not listed as involved.
+    const toggle = within(panel).getByRole("button", { name: /Not involved: Fire & rescue, Ambulance \/ medical/ });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(toggle);
+    expect(within(panel).getByText(/No fire, rescue, trapped-person or structural hazard is reported/)).toBeInTheDocument();
     const traffic = screen.getByText("Traffic analysis").closest("section")!;
     expect(within(traffic).getByText(/Analysis of plan v1/)).toBeInTheDocument();
     expect(document.body.textContent).not.toMatch(/city state v\d|state v\d/); // internal versions stay internal

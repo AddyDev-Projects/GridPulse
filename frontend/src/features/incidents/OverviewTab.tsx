@@ -2,9 +2,11 @@ import { Quotes, Robot, Eye, Question, Lightbulb, Cpu } from "@phosphor-icons/re
 import { useIncidentContext } from "./IncidentLayout";
 import { AGENT_LABEL, Badge, Empty, LoadingBlock, Panel, SimTag, Skeleton, StatusBadge, clock, cx, humanize, when } from "../../components/ui";
 import { useCity, useOverlay } from "../../hooks/queries";
-import { COLORS, CityMap, MapLegend } from "../map/CityMap";
-import type { AgentRun, FacilityRecommendation, Proposal, ResponderRecommendation, ServiceRequirement, TrafficAnalysis } from "../../types/api";
-import { km, mins, relevantFacilities } from "./shared";
+import { COLORS, CityMap, MapLegend, routeTone } from "../map/CityMap";
+import { SERVICE_COLORS } from "../map/mapTheme";
+import type { AgentRun, FacilityRecommendation, Plan, Proposal, ResponderRecommendation, ServiceRequirement, TrafficAnalysis } from "../../types/api";
+import { km, mins, planRouteLayers, relevantFacilities } from "./shared";
+import { DepartmentList, departmentsFromServices } from "./ActionPlan";
 
 function ListBlock({ icon, title, items, tone, hint }: { icon: React.ReactNode; title: string; items: string[]; tone: string; hint: string }) {
   return (
@@ -63,28 +65,16 @@ function ProposalCard({ p }: { p: Proposal }) {
   );
 }
 
-const SERVICE_LABEL: Record<string, string> = { fire_rescue: "Fire & rescue", ambulance: "Ambulance / medical", police: "Police" };
-const SERVICE_TONE = { required: "accent", optional: "warn", not_needed: "neutral" } as const;
 
-function ServicesPanel({ services }: { services: ServiceRequirement[] }) {
+function ServicesPanel({ services, plan }: { services: ServiceRequirement[]; plan?: Plan }) {
+  // Prefer the current plan's departments (with this version's route legs); fall back to the recorded decisions.
+  const departments = plan?.departments?.length ? plan.departments : departmentsFromServices(services);
   return (
-    <Panel title="Response services">
-      <ul className="grid gap-2.5">
-        {services.map((s) => (
-          <li key={s.service} className={cx("rounded-xl border p-3.5", s.status === "not_needed" ? "border-white/[0.05]" : "border-white/[0.08] bg-white/[0.02]")}>
-            <div className="flex flex-wrap items-center gap-2">
-              <span className={cx("text-sm font-medium", s.status === "not_needed" ? "text-fog-400" : "text-fog-100")}>{SERVICE_LABEL[s.service] ?? humanize(s.service)}</span>
-              <Badge tone={SERVICE_TONE[s.status]}>{s.status === "not_needed" ? "not needed" : s.status}</Badge>
-            </div>
-            <p className="mt-1.5 text-[13px] leading-relaxed text-fog-300">{s.rationale}</p>
-            {s.evidence.length > 0 && <p className="mt-1 text-xs text-fog-500">Basis: {s.evidence.join("; ")}</p>}
-            {s.uncertainty && <p className="mt-1 text-xs text-warn">{s.uncertainty}</p>}
-          </li>
-        ))}
-      </ul>
+    <Panel title="Response departments">
+      <DepartmentList departments={departments} />
       <p className="mt-3 text-xs text-fog-500">
-        Only required services get a route in the plan; it still needs evidence and your approval. Optional services are listed for
-        review only. A station on the map is not an available unit, and nothing is dispatched in the real world.
+        Only required departments get a route in the plan; it still needs evidence and your approval. A station on the map is
+        not an available unit, and nothing is dispatched in the real world.
       </p>
     </Panel>
   );
@@ -220,19 +210,23 @@ function RunRow({ r }: { r: AgentRun }) {
 }
 
 function LocationPanel() {
-  const { detail } = useIncidentContext();
+  const { detail, wf } = useIncidentContext();
   const city = useCity();
   const overlay = useOverlay();
   const inc = detail?.incident;
   if (!inc || inc.lat == null || inc.lon == null) return null;
   const geo = detail?.evidence?.geo;
+  // The current plan's routes (the same layers as the Plans tab), so the location map shows who is going where.
+  const layers = planRouteLayers(wf.plans[wf.plans.length - 1], routeTone, SERVICE_COLORS);
   return (
     <Panel title="Location" action={<span className="text-xs text-fog-500">{inc.lat.toFixed(5)}, {inc.lon.toFixed(5)}</span>}>
       {city.data ? (
-        <CityMap city={city.data} className="h-72" focus={[[inc.lat, inc.lon]]} hazard={detail?.hazard_geometry ?? []}
+        <CityMap city={city.data} className="h-72" hazard={detail?.hazard_geometry ?? []}
+          focus={[...layers.routes.flatMap((r) => r.geometry), [inc.lat, inc.lon]]}
           closures={overlay.data?.closures ?? []} pois={relevantFacilities(detail)}
           signals={overlay.data?.nodes.filter((n) => n.kind === "signal") ?? []}
-          markers={[{ id: "inc", lat: inc.lat, lon: inc.lon, label: inc.reference ?? "Report", detail: "reported location" }]} />
+          routes={layers.routes}
+          markers={[...layers.markers, { id: "inc", lat: inc.lat, lon: inc.lon, label: inc.reference ?? "Report", detail: "reported location" }]} />
       ) : <Skeleton className="h-72 w-full" />}
       <div className="mt-3 grid gap-2 text-sm">
         <MapLegend items={[
@@ -330,7 +324,7 @@ export default function OverviewTab() {
             <ul className="grid gap-3">{detail.proposals.map((p) => <ProposalCard key={p.id} p={p} />)}</ul>
           )}
         </Panel>
-        {services.length > 0 ? <ServicesPanel services={services} />
+        {services.length > 0 ? <ServicesPanel services={services} plan={wf.plans[wf.plans.length - 1]} />
           : a && <ResponderPanel recommendations={a.responder_recommendations ?? []} />}
         <TrafficPanel t={(trafficProposal?.payload as unknown as TrafficAnalysis | undefined) ?? null} />
         {facilities.length > 0 && <FacilityPanel recommendations={facilities} />}

@@ -46,6 +46,8 @@ class Coordinator:
         self.db = db
         self.incident = incident
         self.settings = get_settings()
+        self.departments: list[dict[str, Any]] | None = None
+        self.route_legs: list[dict[str, Any]] = []
 
     # ---- helpers ---------------------------------------------------------------------------
     def _pause(self) -> None:
@@ -170,6 +172,8 @@ class Coordinator:
         mp = mobility.propose(snapshot, a, evidence, geo, indicators, services=services)
         self._finish(m_run, mp.as_dict())
         m_prop = self._proposal(m_run, "mobility", mp.summary, mp.as_dict())
+        # Department context every validation of this incident's plans checks against (R9).
+        self.departments, self.route_legs = services.as_list(), mp.route_legs
         audit.record(self.db, "mobility.proposal", f"Mobility proposed: {mp.summary}", incident_id=inc.id,
                      actor="agent:mobility", details={"actions": [x.action_type for x in mp.actions], "failed": mp.failed})
 
@@ -205,7 +209,8 @@ class Coordinator:
         missing = [p for p in mp.failed if p in BASE_ROUTES]
         if missing:
             vrun = store_validation(self.db, plan, validate_plan(actions, snapshot, evidence, traffic=ctx,
-                                                                 plan_version=plan.version),
+                                                                 plan_version=plan.version, departments=self.departments,
+                                                                 route_legs=self.route_legs),
                                     snapshot.state_version, "initial")
             self._escalate(plan, vrun, "NO_SAFE_PLAN",
                            "Mobility found no feasible route for a required responder on the road graph: "
@@ -215,7 +220,8 @@ class Coordinator:
             return
         if not geo.in_coverage or geo.segment_id is None:
             vrun = store_validation(self.db, plan, validate_plan(actions, snapshot, evidence, traffic=ctx,
-                                                                 plan_version=plan.version),
+                                                                 plan_version=plan.version, departments=self.departments,
+                                                                 route_legs=self.route_legs),
                                     snapshot.state_version, "initial")
             self._escalate(plan, vrun, "ESCALATED", "The report is outside the mapped coverage area or not near a road; "
                                                     "it needs manual handling.", [])
@@ -271,7 +277,8 @@ class Coordinator:
         revision = 0
         while True:
             self._transition("VALIDATING" if revision == 0 else "VALIDATING_AGAIN", f"Validating plan v{plan.version}")
-            result = validate_plan(actions, snapshot, evidence, traffic=traffic_context, plan_version=plan.version)
+            result = validate_plan(actions, snapshot, evidence, traffic=traffic_context, plan_version=plan.version,
+                                   departments=self.departments, route_legs=self.route_legs)
             vrun = store_validation(self.db, plan, result, snapshot.state_version, "initial" if revision == 0 else "revision")
             for f in result.blocking():
                 audit.record(self.db, "validation.finding", f"[{f.rule_id}] {f.title}", incident_id=inc.id,
@@ -305,6 +312,8 @@ class Coordinator:
                 r = self._run(c.agent, c.step, "deterministic", c.input, revision)
                 self._finish(r, c.output)
                 self._proposal(r, c.agent, c.summary, c.output, revision)
+                if c.agent == "mobility" and "route_legs" in c.output:
+                    self.route_legs = c.output["route_legs"]  # the revised routes' legs, not v1's
             if isinstance(outcome, RevisionFailure):
                 self._escalate(plan, vrun, "NO_SAFE_PLAN", outcome.reason, outcome.alternatives)
                 return
@@ -359,7 +368,8 @@ class Coordinator:
                 parts.append(f"{a.action_type.replace('_', ' ')} at {snapshot.road(a.target_id).name}")
             else:
                 parts.append(f"{a.action_type.replace('_', ' ')} {a.target_id}")
-        return "; ".join(parts) or "No actions"
+        text = "; ".join(parts) or "No actions"
+        return text[0].upper() + text[1:]
 
 
 def run_workflow(incident_id: uuid.UUID) -> None:

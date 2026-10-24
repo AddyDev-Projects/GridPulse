@@ -58,15 +58,17 @@ class ResponderRecommendation(BaseModel):
 
 
 class ServiceRequirement(BaseModel):
-    """Whether the report justifies a responder service. Only `required` services get a planned route."""
+    """Whether the report justifies a responder department. Only `required` departments get a planned route."""
 
     model_config = ConfigDict(extra="forbid")
 
     service: ResponderType
-    status: Literal["required", "optional", "not_needed"]
+    status: Literal["required", "recommended", "conditional", "not_justified"]
+    basis: Literal["reported", "inference", "rule"] = "reported"
     rationale: str = Field(max_length=400)
     evidence: list[str] = Field(default_factory=list, max_length=8)
-    uncertainty: str | None = Field(default=None, max_length=300)
+    unknowns: list[str] = Field(default_factory=list, max_length=6)
+    expected_action: str | None = Field(default=None, max_length=300)
 
 
 class FacilityRecommendation(BaseModel):

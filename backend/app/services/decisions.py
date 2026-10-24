@@ -23,7 +23,7 @@ from app.db.base import utcnow
 from app.models import Approval, Incident, Operator, ResponsePlan, SimulationExecution, SimulationRoute
 from app.services import audit
 from app.agents import traffic
-from app.services.plans import action_specs, content_hash, incident_context, latest_validation, store_validation
+from app.services.plans import action_specs, content_hash, department_context, incident_context, latest_validation, store_validation
 from app.simulation.repository import get_meta, load_snapshot, persist_changes
 from app.simulation.state import apply_actions
 from app.validation.validator import validate_plan
@@ -150,8 +150,9 @@ def revalidate(db: Session, plan_id: uuid.UUID, op: Operator) -> ResponsePlan:
     _, evidence = incident_context(db, incident.id)
     snapshot = load_snapshot(db, meta)
     specs = action_specs(plan)
+    departments, legs = department_context(db, incident.id)
     result = validate_plan(specs, snapshot, evidence, traffic=_fresh_traffic(snapshot, specs, evidence, plan.version),
-                           plan_version=plan.version)
+                           plan_version=plan.version, departments=departments, route_legs=legs)
     store_validation(db, plan, result, meta.state_version, "revalidate")
     if result.passed:
         plan.status = "AWAITING_APPROVAL"
@@ -212,8 +213,10 @@ def execute(db: Session, plan_id: uuid.UUID, op: Operator) -> SimulationExecutio
     # Fresh deterministic validation immediately before mutating anything.
     _, evidence = incident_context(db, incident.id)
     snapshot = load_snapshot(db, meta)
+    departments, legs = department_context(db, incident.id)
     result = validate_plan(specs, snapshot, evidence, expected_state_version=appr.state_version,
-                           traffic=_fresh_traffic(snapshot, specs, evidence, plan.version), plan_version=plan.version)
+                           traffic=_fresh_traffic(snapshot, specs, evidence, plan.version), plan_version=plan.version,
+                           departments=departments, route_legs=legs)
     store_validation(db, plan, result, meta.state_version, "pre_execution")
     if not result.passed:
         appr.status = "invalidated"

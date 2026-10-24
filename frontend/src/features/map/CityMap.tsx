@@ -70,6 +70,8 @@ export interface CityMapProps {
   picked?: LatLng | null;
   onPick?: (p: LatLng) => void;
   ariaLabel?: string;
+  /** Wheel zooms the map. Off by default so pages scroll past embedded maps; use +/−, double-click or Ctrl/⌘+wheel. */
+  scrollZoom?: boolean;
 }
 
 function FitTo({ points, fallback, skipFirst }: { points: LatLng[] | null | undefined; fallback: LatLngBoundsExpression; skipFirst?: boolean }) {
@@ -114,6 +116,22 @@ function poiIcon(kind: Poi["kind"]) {
     poiIcons.set(kind, icon);
   }
   return icon;
+}
+
+/** Ctrl/⌘ + wheel zooms even when plain wheel scrolling is left to the page. */
+function CtrlWheelZoom() {
+  const map = useMap();
+  useEffect(() => {
+    const el = map.getContainer();
+    const onWheel = (e: WheelEvent) => {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      e.preventDefault();
+      map.setZoom(map.getZoom() + (e.deltaY < 0 ? 1 : -1));
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, [map]);
+  return null;
 }
 
 function PickHandler({ onPick }: { onPick: (p: LatLng) => void }) {
@@ -171,14 +189,15 @@ function GraphLayer() {
 
 function LeafletMap({
   city, markers = [], closures = [], routes = [], hazard = [], signals = [], zones = [], pois = [],
-  showGraph = false, focus, picked, onPick, initialView, onView,
+  showGraph = false, focus, picked, onPick, initialView, onView, scrollZoom = false,
 }: CityMapProps & { initialView?: MapView | null; onView?: (v: MapView) => void }) {
   const [s, w, n, e] = city.coverage_bbox;
   const coverage: LatLngBoundsExpression = useMemo(() => [[s, w], [n, e]], [s, w, n, e]);
   const start = initialView ? { center: initialView.center as LatLngExpression, zoom: initialView.zoom } : { bounds: coverage };
   return (
       <MapContainer {...start} maxBounds={[[s - 0.05, w - 0.05], [n + 0.05, e + 0.05]]} minZoom={12} maxZoom={19}
-        className="h-full w-full bg-ink-900" scrollWheelZoom style={{ cursor: onPick ? "crosshair" : undefined }}>
+        className="h-full w-full bg-ink-900" scrollWheelZoom={scrollZoom} style={{ cursor: onPick ? "crosshair" : undefined }}>
+        {!scrollZoom && <CtrlWheelZoom />}
         <TileLayer url={TILE_URL} attribution={TILE_ATTRIBUTION} maxZoom={19} className="gp-dark-tiles" />
         <Rectangle bounds={coverage} pathOptions={{ color: "#b4a2fb", weight: 1, dashArray: "6 6", fill: false, opacity: 0.6 }}>
           <Tooltip sticky>GridPulse coverage area (mapped road graph)</Tooltip>

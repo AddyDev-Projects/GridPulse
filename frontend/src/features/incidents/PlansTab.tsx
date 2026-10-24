@@ -1,10 +1,12 @@
 import { useState } from "react";
 import { ArrowRight, CheckCircle, XCircle, GitBranch } from "@phosphor-icons/react";
 import { useIncidentContext } from "./IncidentLayout";
-import { ActionRow, FindingCard, km, mins, relevantFacilities, trafficFor } from "./shared";
+import { ActionPlan } from "./ActionPlan";
+import { ActionRow, FindingCard, km, mins, planRouteLayers, relevantFacilities, trafficFor } from "./shared";
 import { useCity, useOverlay } from "../../hooks/queries";
 import { AGENT_LABEL, Badge, Empty, Panel, Skeleton, StatusBadge, TextLink, cx, humanize } from "../../components/ui";
 import { COLORS, CityMap, MapLegend, SERVICE_LEGEND, routeTone, type MapMarker, type MapRoute } from "../map/CityMap";
+import { SERVICE_COLORS } from "../map/mapTheme";
 import type { Closure, LatLng, Plan, Revision } from "../../types/api";
 
 const routesOf = (p: Plan) => p.actions.filter((a) => a.action_type === "designate_response_route");
@@ -143,9 +145,8 @@ function PlanMap({ before, after }: { before: Plan | null; after: Plan }) {
   const blocked = before ?? (after.latest_validation?.passed ? null : after);
   const routes: MapRoute[] = [];
   if (blocked) routesOf(blocked).forEach((a) => a.geometry && routes.push({ id: `b${a.seq}`, geometry: a.geometry, tone: "conflict", label: `v${blocked.version}: ${a.params.name as string} (blocked)` }));
-  if (after !== blocked) routesOf(after).forEach((a) => a.geometry && routes.push({
-    id: `a${a.seq}`, geometry: a.geometry, tone: routeTone(a.params.purpose as string),
-    label: `v${after.version}: ${a.params.name as string}` }));
+  const layers = planRouteLayers(after !== blocked ? after : undefined, routeTone, SERVICE_COLORS);
+  routes.push(...layers.routes);
   // Alternatives AnalyseTraffic evaluated for this exact plan version but did not select.
   (trafficFor(detail, after.version)?.alternative_routes ?? []).forEach((alt, i) => alt.geometry && routes.push({
     id: `alt${i}`, geometry: alt.geometry, tone: routeTone(alt.purpose), alternative: true,
@@ -158,18 +159,26 @@ function PlanMap({ before, after }: { before: Plan | null; after: Plan }) {
   const signals = overlay.data?.nodes.filter((n) => n.kind === "signal") ?? [];
   const markers: MapMarker[] = signals.filter((s) => chainSignals.has(s.id)).map((s) => ({
     id: `chain-${s.id}`, lat: s.lat, lon: s.lon, label: s.name, detail: "would go dark under the blocked plan", color: COLORS.conflict, radius: 13 }));
+  markers.push(...layers.markers);
   const inc = detail?.incident;
   if (inc?.lat != null && inc.lon != null) markers.push({ id: "inc", lat: inc.lat, lon: inc.lon, label: inc.reference ?? "Report", detail: "reported location" });
   const focus: LatLng[] = routes.flatMap((r) => r.geometry);
+  const legendFor = SERVICE_LEGEND.filter((_, i) => layers.services.has(["fire_rescue", "police", "ambulance"][i]));
   return (
     <div className="grid gap-3">
       <CityMap city={city.data} className="h-[460px]" routes={routes} closures={closures} hazard={detail?.hazard_geometry ?? []}
         signals={signals} pois={relevantFacilities(detail)} markers={markers}
         focus={focus.length ? focus : inc?.lat != null ? [[inc.lat, inc.lon!]] : null} />
+      {layers.missing.length > 0 && (
+        <ul className="grid gap-1 rounded-xl bg-warn/[0.06] p-3 text-xs text-warn ring-1 ring-inset ring-warn/20" aria-label="Routes not on the map">
+          {layers.missing.map((m) => <li key={m}>{m}</li>)}
+        </ul>
+      )}
       <MapLegend items={[
-        ...SERVICE_LEGEND,
-        { color: COLORS.fog, label: "Alternative (not selected)", dash: "4 8" },
-        { color: COLORS.conflict, label: "Blocked route (plan before revision)", dash: "6 10" },
+        { color: COLORS.incident, label: "Incident", dot: true },
+        ...legendFor,
+        ...(routes.some((r) => r.alternative) ? [{ color: COLORS.fog, label: "Alternative (not selected)", dash: "4 8" }] : []),
+        ...(blocked ? [{ color: COLORS.conflict, label: "Blocked route (plan before revision)", dash: "6 10" }] : []),
         { color: COLORS.closed, label: "Closures in this plan", dashed: true },
         { color: COLORS.hazard, label: "Modelled hazard area" },
         { color: COLORS.signalOk, label: "OSM traffic signal (simulated power)", dot: true },
@@ -180,7 +189,7 @@ function PlanMap({ before, after }: { before: Plan | null; after: Plan }) {
 }
 
 export default function PlansTab() {
-  const { wf } = useIncidentContext();
+  const { wf, detail } = useIncidentContext();
   const [revIdx, setRevIdx] = useState<number | null>(null);
   if (wf.plans.length === 0) return <Empty title={wf.running ? "The coordinator is assembling the first plan" : "No plans yet"} />;
   const revisions = wf.revisions;
@@ -188,6 +197,7 @@ export default function PlansTab() {
   const rev = revisions[idx];
   const before = rev ? wf.plans.find((p) => p.id === rev.from_plan_id)! : null;
   const after = rev ? wf.plans.find((p) => p.id === rev.to_plan_id)! : wf.plans[wf.plans.length - 1];
+  const current = wf.plans[wf.plans.length - 1];
 
   return (
     <div className="grid grid-cols-1 gap-6">
@@ -201,6 +211,9 @@ export default function PlansTab() {
           ))}
         </div>
       )}
+      <Panel title="Action plan">
+        <ActionPlan plan={current} incident={detail?.incident} unknowns={detail?.assessment?.missing_information ?? []} />
+      </Panel>
       <Panel title="Plan on the map of Mangaluru" action={<TextLink to="/ops/city">Open city map</TextLink>}>
         <PlanMap before={before} after={after} />
       </Panel>
@@ -213,9 +226,7 @@ export default function PlansTab() {
             <PlanColumn plan={after} title="After" side="after" revision={rev} />
           </div>
         </>
-      ) : (
-        <PlanColumn plan={after} title="Plan" side="before" />
-      )}
+      ) : null}
       {wf.plans.length > 1 && <CoordinationComparison first={wf.plans[0]} final={wf.plans[wf.plans.length - 1]} />}
     </div>
   );

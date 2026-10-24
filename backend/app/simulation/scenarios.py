@@ -100,8 +100,9 @@ SCENARIOS: dict[str, Scenario] = {
                              "coordinator escalates without changing the city. (In reality this area also connects "
                              "northwards outside the mapped bounding box; the dead end is a coverage limitation.)",
             lat=12.858388, lon=74.825563, category="flood",
-            report_text="The road here is completely under water and the only way in is blocked too.",
-            indicators=("water_rising",), location_description="Illustrative location (simulation)",
+            report_text="The road here is completely under water, a family is cut off in their house, and the only "
+                        "way in is blocked too.",
+            indicators=("water_rising", "people_trapped"), location_description="Illustrative location (simulation)",
             sensors=_FLOOD_SENSORS[:2], pre_closures=("w164559538s0",), expects="no_route",
         ),
         Scenario(

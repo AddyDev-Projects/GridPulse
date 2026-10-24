@@ -70,6 +70,8 @@ class MobilityProposal:
     uncertainty: list[str] = field(default_factory=list)
     facility_recommendations: list[dict[str, Any]] = field(default_factory=list)
     service_requirements: list[dict[str, Any]] = field(default_factory=list)
+    # Every leg each required department needs, planned or not, so a missing route is never silent.
+    route_legs: list[dict[str, Any]] = field(default_factory=list)
 
     @property
     def summary(self) -> str:
@@ -88,6 +90,7 @@ class MobilityProposal:
             "excluded_nodes": self.excluded_nodes, "reasoning": self.reasoning, "uncertainty": self.uncertainty,
             "facility_recommendations": self.facility_recommendations,
             "service_requirements": self.service_requirements,
+            "route_legs": self.route_legs,
         }
 
 
@@ -164,7 +167,7 @@ def medical_route(snapshot: CitySnapshot, geo: IncidentGeo, staging: str, exclud
     if best is None:
         return None
     h, node, r = best
-    return PlannedRoute("medical_transfer", f"Medical transfer to {h.label}", staging,
+    return PlannedRoute("medical_transfer", f"Medical transfer (incident to hospital): {h.label}", staging,
                         f"Staging point near {snapshot.graph.node_label(staging)}", node, h.label, r, "ambulance")
 
 
@@ -296,14 +299,26 @@ def propose(
     planned: list[PlannedRoute] = []
     failed: list[str] = []
     staging, found = choose_staging(snapshot, geo, required, exclude_edges, exclude_nodes)
+    legs: list[dict[str, Any]] = []
     for service in required:
+        if service == "ambulance":
+            # OSM has no ambulance stations in the mapped area, and a hospital is not assumed to be one.
+            legs.append({"service": service, "leg": "to_incident", "purpose": None, "status": "unavailable",
+                         "reason": "No ambulance station is mapped in OpenStreetMap for this area, so the ambulance's "
+                                   "starting point is unknown and this leg cannot be routed."})
         r = found.get(service)
+        leg = "to_hospital" if service == "ambulance" else "to_incident"
         if r is None:
             failed.append(ROUTE_PURPOSE[service])
-            reasoning.append(f"No {FACILITY_KIND[service].replace('_', ' ')} in OSM is connected to a staging point near the "
-                             f"incident for the {service.replace('_', ' ')} route with the current closures and exclusions.")
+            why = (f"No valid road route could be calculated: no {FACILITY_KIND[service].replace('_', ' ')} in "
+                   f"OpenStreetMap is connected to a staging point near the incident with the current closures and exclusions.")
+            reasoning.append(why)
+            legs.append({"service": service, "leg": leg, "purpose": ROUTE_PURPOSE[service], "status": "unavailable", "reason": why})
             continue
         planned.append(r)
+        legs.append({"service": service, "leg": leg, "purpose": r.purpose, "status": "planned", "name": r.name,
+                     "origin_label": r.origin_label, "destination_label": r.destination_label,
+                     "length_m": round(r.route.length_m, 1), "travel_s": round(r.route.travel_s, 1)})
         reasoning.append(f"{r.name}: {len(r.route.edge_path)} segments, {r.route.length_m:.0f} m, "
                          f"~{r.route.travel_s / 60:.1f} min estimated free-flow (not live traffic).")
 
@@ -325,4 +340,4 @@ def propose(
     for r in planned:
         actions.append(r.action("Fastest path by estimated travel time on the OSM road graph, one-way aware."))
     return MobilityProposal(actions, planned, failed, staging or None, sorted(exclude_edges), sorted(exclude_nodes),
-                            reasoning, uncertainty, facilities, services.as_list())
+                            reasoning, uncertainty, facilities, services.as_list(), legs)

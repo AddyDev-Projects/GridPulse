@@ -216,10 +216,9 @@ def rule_based_triage(report: str, category_hint: str, indicators: list[str], ge
 
     sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", report) if len(s.strip()) > 3]
     missing = []
-    if not re.search(r"\b(\d+\s?(cm|m|inch|ft|feet)|knee|waist|kerb|curb|ankle)\b", text):
-        missing.append("Depth or extent of the hazard not stated")
-    if not re.search(r"\b(\d{1,2}[:.]\d{2}|minutes? ago|just now|now|right now)\b", text):
-        missing.append("Time of observation not stated in the text")
+    # Depth matters for water hazards only; the report time is the server's submission time, so it is never "unknown".
+    if category in ("flood", "rescue") and not re.search(r"\b(\d+\s?(cm|m|inch|ft|feet)|knee|waist|kerb|curb|ankle)\b", text):
+        missing.append("Depth or extent of the water not stated")
     if not (set(indicators) & {"people_trapped", "injuries", "multiple_injured", "person_unconscious"}) and not re.search(r"\b(injur|hurt|trapped|unconscious)\b", text):
         missing.append("Whether anyone is injured or trapped is unknown")
     if geo is None or not geo.in_coverage:

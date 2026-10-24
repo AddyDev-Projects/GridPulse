@@ -32,7 +32,7 @@ def test_confirmed_police_report_plans_only_a_police_response(admin, anon):
     assert not any(a["action_type"] in ("close_roads", "isolate_substation", "issue_public_advisory") for a in plan["actions"])
     detail = admin.get(f"/api/incidents/{inc}").json()
     assert {s["service"]: s["status"] for s in detail["services"]} == {
-        "fire_rescue": "not_needed", "ambulance": "not_needed", "police": "required"}
+        "fire_rescue": "not_justified", "ambulance": "not_justified", "police": "required"}
     events = admin.get(f"/api/incidents/{inc}/audit").json()
     assert any(e["event_type"] == "services.selected" and "police required" in e["message"] for e in events)
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -273,6 +273,34 @@ class RevisionOut(ORM):
     created_at: datetime
 
 
+class RouteLegOut(BaseModel):
+    service: str
+    leg: Literal["to_incident", "to_hospital"]
+    purpose: str | None = None
+    status: Literal["planned", "unavailable", "withheld"]
+    reason: str | None = None
+    action_seq: int | None = None
+    name: str | None = None
+    origin_label: str | None = None
+    destination_label: str | None = None
+    length_m: float | None = None
+    travel_s: float | None = None
+
+
+class DepartmentOut(BaseModel):
+    """Why a department is (or is not) involved in this plan, and its route legs in this plan version."""
+
+    service: str
+    label: str
+    status: Literal["required", "recommended", "conditional", "not_justified"]
+    basis: Literal["reported", "inference", "rule"] = "reported"
+    rationale: str = ""
+    evidence: list[str] = []
+    unknowns: list[str] = []
+    expected_action: str | None = None
+    routes: list[RouteLegOut] = []
+
+
 class PlanOut(ORM):
     id: uuid.UUID
     incident_id: uuid.UUID
@@ -292,6 +320,7 @@ class PlanOut(ORM):
     current_state_version: int
     approvable: bool = False
     approval_blockers: list[str] = []
+    departments: list[DepartmentOut] = []  # empty for plans made before department selection existed
 
 
 class WorkflowOut(BaseModel):

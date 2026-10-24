@@ -57,7 +57,8 @@ from app.schemas.api import (
     WorkflowOut,
 )
 from app.services import audit, decisions
-from app.services.plans import latest_validation
+from app.agents.services import plan_departments
+from app.services.plans import department_context, latest_validation
 from app.services.reports import create_report
 from app.simulation.infrastructure import zone_bounds
 from app.simulation.repository import (
@@ -136,6 +137,7 @@ def _plan_out(db: Session, plan: ResponsePlan, current_state_version: int) -> Pl
     approvals = db.scalars(select(Approval).where(Approval.plan_id == plan.id).order_by(Approval.created_at)).all()
     execution = db.scalars(select(SimulationExecution).where(SimulationExecution.plan_id == plan.id)).first()
     inc = db.get(Incident, plan.incident_id)
+    departments, legs = department_context(db, plan.incident_id)
 
     blockers: list[str] = []
     if inc is not None and inc.city_id is None:
@@ -167,6 +169,7 @@ def _plan_out(db: Session, plan: ResponsePlan, current_state_version: int) -> Pl
         approvals=[ApprovalOut.model_validate(a) for a in approvals],
         execution=ExecutionOut.model_validate(execution) if execution else None,
         current_state_version=current_state_version, approvable=not blockers, approval_blockers=blockers,
+        departments=plan_departments(departments, legs, plan.actions) if departments else [],
     )
 
 

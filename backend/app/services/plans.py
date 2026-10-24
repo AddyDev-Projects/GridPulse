@@ -9,7 +9,7 @@ import uuid
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import AgentRun, PlanAction, ResponsePlan, ValidationFinding, ValidationRun
+from app.models import AgentProposal, AgentRun, PlanAction, ResponsePlan, ValidationFinding, ValidationRun
 from app.schemas.agents import EvidenceAssessment, SentinelAssessment
 from app.simulation.state import ActionSpec
 from app.validation.validator import Finding, ValidationResult
@@ -102,3 +102,18 @@ def incident_context(db: Session, incident_id: uuid.UUID) -> tuple[SentinelAsses
         elif r.step == "evidence" and r.output:
             evidence = EvidenceAssessment.model_validate(r.output)
     return assessment, evidence
+
+
+def department_context(db: Session, incident_id: uuid.UUID) -> tuple[list[dict] | None, list[dict]]:
+    """The incident's recorded department decisions and the latest route legs (None for older incidents)."""
+    run = db.scalars(select(AgentRun).where(AgentRun.incident_id == incident_id, AgentRun.step == "select_services",
+                                            AgentRun.status == "succeeded").order_by(AgentRun.started_at.desc())).first()
+    departments = (run.output or {}).get("services") if run else None
+    legs: list[dict] = []
+    for prop in db.scalars(select(AgentProposal).where(AgentProposal.incident_id == incident_id,
+                                                       AgentProposal.agent == "mobility")
+                           .order_by(AgentProposal.created_at.desc())):
+        if prop.payload and "route_legs" in prop.payload:
+            legs = list(prop.payload["route_legs"])
+            break
+    return departments, legs

@@ -43,7 +43,7 @@ def actions_of(snap, geo, ev, a, indicators, services) -> tuple[list[ActionSpec]
 # ---- service selection -------------------------------------------------------------------------
 def test_police_only_incident_gets_a_police_route_and_no_fire_response():
     snap, geo, ev, a, services = incident("theft_robbery_burglary", [], "Someone broke into the shop and stole things.")
-    assert statuses(services) == {"fire_rescue": "not_needed", "ambulance": "not_needed", "police": "required"}
+    assert statuses(services) == {"fire_rescue": "not_justified", "ambulance": "not_justified", "police": "required"}
     acts, mp = actions_of(snap, geo, ev, a, [], services)
     assert [r.purpose for r in mp.routes] == ["police_response"]
     assert mp.routes[0].service == "police" and "Police Station" in mp.routes[0].origin_label
@@ -56,7 +56,7 @@ def test_police_only_incident_gets_a_police_route_and_no_fire_response():
 
 def test_medical_only_incident_plans_a_hospital_route_and_no_fire_response():
     snap, geo, ev, a, services = incident("medical_emergency", ["person_unconscious"], "A man collapsed and is unconscious.")
-    assert statuses(services) == {"fire_rescue": "not_needed", "ambulance": "required", "police": "not_needed"}
+    assert statuses(services) == {"fire_rescue": "not_justified", "ambulance": "required", "police": "not_justified"}
     _, mp = actions_of(snap, geo, ev, a, ["person_unconscious"], services)
     assert [r.purpose for r in mp.routes] == ["medical_transfer"]
     assert mp.routes[0].service == "ambulance"
@@ -67,10 +67,10 @@ def test_multi_service_incident_gets_each_justified_route_once():
     ind = ["people_trapped", "injuries"]
     snap, geo, ev, a, services = incident("accident", ind, "Two cars collided, a driver is trapped and people are hurt.")
     st = statuses(services)
-    assert st["fire_rescue"] == "required" and st["ambulance"] == "required"
-    assert st["police"] == "optional"  # traffic control is plausible but not established: no route
+    assert st == {"fire_rescue": "required", "ambulance": "required", "police": "required"}
+    assert {d.service: d.basis for d in services.decisions} == {"fire_rescue": "reported", "ambulance": "reported", "police": "rule"}
     _, mp = actions_of(snap, geo, ev, a, ind, services)
-    assert sorted(r.purpose for r in mp.routes) == ["emergency_access", "medical_transfer"]
+    assert sorted(r.purpose for r in mp.routes) == ["emergency_access", "medical_transfer", "police_response"]
     assert len({r.purpose for r in mp.routes}) == len(mp.routes)
 
 
@@ -86,7 +86,8 @@ def test_fire_with_weapon_requires_fire_and_police():
 
 def test_text_only_mentions_stay_optional_and_get_no_route():
     snap, geo, ev, a, services = incident("other", [], "There is a suspicious man with a knife near the bus stop.")
-    assert statuses(services)["police"] == "optional"
+    assert statuses(services)["police"] == "conditional"
+    assert next(d for d in services.decisions if d.service == "police").basis == "inference"
     assert services.required() == []
     _, mp = actions_of(snap, geo, ev, a, [], services)
     assert mp.routes == [] and mp.failed == []
@@ -268,7 +269,7 @@ def test_a_model_misreading_the_category_does_not_add_services():
     snap, geo, ev, a, _ = incident("theft_robbery_burglary", [], "Someone broke into the shop.")
     misread = a.model_copy(update={"category": "fire"})  # e.g. an LLM mislabels the report as a fire
     st = statuses(select_services("theft_robbery_burglary", [], misread))
-    assert st == {"fire_rescue": "not_needed", "ambulance": "not_needed", "police": "required"}
+    assert st == {"fire_rescue": "not_justified", "ambulance": "not_justified", "police": "required"}
 
 
 def test_staging_serves_every_required_route_even_when_the_perimeter_is_a_dead_end():
@@ -281,7 +282,7 @@ def test_staging_serves_every_required_route_even_when_the_perimeter_is_a_dead_e
     a = sentinel.rule_based_triage("Two cars collided, a driver is trapped and people are hurt.", "accident", ind, geo)
     mp = mobility.propose(snap, a, ev, geo, ind, services=select_services("accident", ind, a))
     assert mp.failed == []
-    assert {r.purpose for r in mp.routes} == {"emergency_access", "medical_transfer"}
-    assert len({r.route.node_path[-1] for r in mp.routes if r.purpose == "emergency_access"}
+    assert {r.purpose for r in mp.routes} == {"emergency_access", "medical_transfer", "police_response"}
+    assert len({r.route.node_path[-1] for r in mp.routes if r.purpose in ("emergency_access", "police_response")}
                | {r.route.node_path[0] for r in mp.routes if r.purpose == "medical_transfer"}) == 1  # one shared staging point
     assert not any(set(r.route.edge_path) & set(geo.hazard_segment_ids) for r in mp.routes)

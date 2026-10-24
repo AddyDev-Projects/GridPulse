@@ -199,6 +199,7 @@ export default function MapLibre3D(props: CityMapProps & {
         container: root.current, style: STYLE_URL, center: ll(start.center), zoom: toML(start.zoom), pitch: 60, bearing: -17,
         maxPitch: 75, minZoom: 11, maxZoom: 19, maxBounds: [[w - 0.06, s - 0.06], [e + 0.06, n + 0.06]],
         attributionControl: { compact: true, customAttribution: ATTRIBUTION },
+        cooperativeGestures: !latest.current.scrollZoom, // as in 2D: the page scrolls unless Ctrl/⌘ is held
       });
     } catch (err) {
       onFailure(err instanceof Error ? err.message : "the 3D renderer could not start");

@@ -69,6 +69,7 @@ export function GoogleMapCanvas({
   onPick,
   showTraffic = false,
   onTrafficAvailable,
+  scrollZoom = false,
 }: CityMapProps & {
   apiKey: string;
   onFailure: (reason: string) => void;
@@ -108,7 +109,8 @@ export function GoogleMapCanvas({
           fullscreenControl: true,
           mapTypeControl: false,
           clickableIcons: false,
-          gestureHandling: "greedy",
+          // "cooperative": Ctrl/⌘+wheel zooms and plain wheel scrolls the page, unless the page opts in.
+          gestureHandling: scrollZoom ? "greedy" : "cooperative",
           backgroundColor: "#0c0a12",
           styles: [
             { elementType: "geometry", stylers: [{ color: "#161320" }] },
