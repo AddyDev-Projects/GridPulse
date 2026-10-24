@@ -1,6 +1,8 @@
 import { Quotes, Robot, Eye, Question, Lightbulb, Cpu } from "@phosphor-icons/react";
 import { useIncidentContext } from "./IncidentLayout";
-import { AGENT_LABEL, Badge, Empty, LoadingBlock, Panel, SimTag, StatusBadge, clock, cx, humanize } from "../../components/ui";
+import { AGENT_LABEL, Badge, Empty, LoadingBlock, Panel, SimTag, Skeleton, StatusBadge, clock, cx, humanize } from "../../components/ui";
+import { useCity, useOverlay } from "../../hooks/queries";
+import { COLORS, CityMap, MapLegend } from "../map/CityMap";
 import type { AgentRun, Proposal } from "../../types/api";
 
 function ListBlock({ icon, title, items, tone, hint }: { icon: React.ReactNode; title: string; items: string[]; tone: string; hint: string }) {
@@ -70,6 +72,44 @@ function RunRow({ r }: { r: AgentRun }) {
   );
 }
 
+function LocationPanel() {
+  const { detail } = useIncidentContext();
+  const city = useCity();
+  const overlay = useOverlay();
+  const inc = detail?.incident;
+  if (!inc || inc.lat == null || inc.lon == null) return null;
+  const geo = detail?.evidence?.geo;
+  return (
+    <Panel title="Location" action={<span className="text-xs text-fog-500">{inc.lat.toFixed(5)}, {inc.lon.toFixed(5)}</span>}>
+      {city.data ? (
+        <CityMap city={city.data} className="h-72" focus={[[inc.lat, inc.lon]]} hazard={detail?.hazard_geometry ?? []}
+          closures={overlay.data?.closures ?? []} pois={overlay.data?.pois ?? []}
+          signals={overlay.data?.nodes.filter((n) => n.kind === "signal") ?? []}
+          markers={[{ id: "inc", lat: inc.lat, lon: inc.lon, label: inc.reference ?? "Report", detail: "reported location" }]} />
+      ) : <Skeleton className="h-72 w-full" />}
+      <div className="mt-3 grid gap-2 text-sm">
+        <MapLegend items={[
+          { color: COLORS.incident, label: "Reported location", dot: true },
+          { color: COLORS.hazard, label: "Modelled hazard area" },
+          { color: COLORS.closed, label: "Existing closure", dashed: true },
+        ]} />
+        {geo ? (
+          <p className="text-fog-400">
+            Snapped to <span className="text-fog-100">{geo.segment_name ?? "no road"}</span>
+            {geo.snap_distance_m != null ? ` (${Math.round(geo.snap_distance_m)} m away)` : ""}; hazard model
+            radius {Math.round(geo.hazard_radius_m)} m covering {geo.hazard_segment_ids.length} real road segment(s);
+            simulated feeder zone {geo.zone_id ?? "none"}.
+          </p>
+        ) : <p className="text-fog-500">Road snapping and the hazard model are computed when the agents run.</p>}
+        {inc.location_description && <p className="text-fog-500">Landmark given by the reporter: {inc.location_description}</p>}
+        {inc.indicators.length > 0 && (
+          <div className="flex flex-wrap gap-1.5">{inc.indicators.map((i) => <Badge key={i} tone="warn">{humanize(i)}</Badge>)}</div>
+        )}
+      </div>
+    </Panel>
+  );
+}
+
 export default function OverviewTab() {
   const { wf, detail } = useIncidentContext();
   if (!detail) return <LoadingBlock rows={4} />;
@@ -85,11 +125,14 @@ export default function OverviewTab() {
               <blockquote className="text-[15px] leading-relaxed text-fog-100">{detail.incident.report_text}</blockquote>
               <figcaption className="mt-2 text-xs text-fog-500">
                 {detail.incident.reporter_alias}
-                {detail.incident.location_hint ? ` · hint: ${detail.incident.location_hint}` : ""} · unverified until corroborated
+                {detail.incident.observed_at ? ` · observed ${clock(detail.incident.observed_at)}` : ""}
+                {detail.incident.verified_at ? ` · confirmed by ${detail.verified_by}` : " · unverified until corroborated"}
               </figcaption>
             </div>
           </figure>
         </Panel>
+
+        <LocationPanel />
 
         <Panel
           title="Sentinel assessment"
@@ -155,7 +198,7 @@ export default function OverviewTab() {
               {ev.warnings.map((w) => (
                 <p key={w} className="rounded-lg bg-warn/[0.06] px-3 py-2 text-xs text-warn ring-1 ring-inset ring-warn/20">{w}</p>
               ))}
-              <div className="scrollbar-thin overflow-x-auto">
+              {ev.observations.length > 0 && <div className="scrollbar-thin overflow-x-auto">
                 <table className="w-full min-w-[420px] text-left text-xs">
                   <caption className="sr-only">Synthetic sensor observations</caption>
                   <thead className="text-fog-500">
@@ -179,10 +222,19 @@ export default function OverviewTab() {
                     ))}
                   </tbody>
                 </table>
-              </div>
+              </div>}
+              {ev.operator_confirmation && (
+                <p className="rounded-lg bg-lilac-300/[0.07] px-3 py-2 text-xs text-lilac-200 ring-1 ring-inset ring-lilac-300/20">
+                  Operator {ev.operator_confirmation.operator} confirmed the hazard at {clock(ev.operator_confirmation.confirmed_at)}
+                  {ev.operator_confirmation.note ? `: "${ev.operator_confirmation.note}"` : ""}.
+                </p>
+              )}
+              {ev.observations.length === 0 && (
+                <p className="text-xs text-fog-400">No sensor observes this location. GridPulse has no live sensor feed; synthetic
+                  sensors exist only while a demo scenario is loaded.</p>
+              )}
               <p className="text-xs text-fog-500">
-                Readings older than {ev.fresh_window_minutes} min are stale. All observations are synthetic and generated by the
-                scenario, not live sensors.
+                Readings older than {ev.fresh_window_minutes} min are stale. Every observation shown is synthetic.
               </p>
             </div>
           )}
@@ -195,7 +247,7 @@ export default function OverviewTab() {
             <ul className="divide-y divide-white/[0.05]">{wf.agent_runs.map((r) => <RunRow key={r.id} r={r} />)}</ul>
           )}
           <p className="mt-3 flex items-center gap-1.5 text-xs text-fog-500">
-            <Robot size={13} /> Only Sentinel's triage may use an LLM. Routing, dependencies and validation are deterministic.
+            <Robot size={13} /> Only Sentinel's triage may use an LLM. Snapping, routing, dependencies and validation are deterministic.
           </p>
         </Panel>
       </div>

@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router";
 import {
   ArrowRight,
-  ArrowDown,
   List,
   X,
   ShieldCheck,
@@ -21,7 +20,8 @@ import { cx } from "../../components/ui";
 const NAV = [
   { label: "Overview", href: "#top" },
   { label: "How It Works", href: "#how" },
-  { label: "Simulation", to: "/ops" },
+  { label: "Report a hazard", to: "/report" },
+  { label: "Live map", to: "/status" },
   { label: "Architecture", href: "#architecture" },
 ];
 
@@ -74,7 +74,7 @@ function LandingNav() {
             to="/ops"
             className="hidden h-10 items-center gap-2 whitespace-nowrap rounded-full bg-fog-100 px-5 text-[13.5px] font-medium text-ink-950 transition hover:bg-white active:scale-[0.98] sm:inline-flex"
           >
-            Launch Simulation <ArrowRight size={15} weight="bold" />
+            Operator console <ArrowRight size={15} weight="bold" />
           </Link>
           <button
             type="button"
@@ -102,7 +102,7 @@ function LandingNav() {
             ),
           )}
           <Link to="/ops" className="mt-1 flex h-11 items-center justify-center gap-2 rounded-xl bg-fog-100 text-sm font-medium text-ink-950">
-            Launch Simulation <ArrowRight size={15} weight="bold" />
+            Operator console <ArrowRight size={15} weight="bold" />
           </Link>
         </div>
       )}
@@ -127,23 +127,23 @@ function Hero() {
           <span className="text-gradient font-normal">Intelligence Must Work Together.</span>
         </h1>
         <p className="enter mt-6 max-w-[56ch] text-[15px] leading-relaxed text-fog-300 sm:text-base" style={{ ["--d" as string]: "520ms" }}>
-          GridPulse coordinates intelligent agents, infrastructure dependencies, and human decisions to simulate safer,
-          faster urban emergency response.
+          GridPulse coordinates intelligent agents, infrastructure dependencies, and human decisions to simulate safer
+          emergency response on Mangaluru's real road network.
         </p>
         <div className="enter mt-9 flex flex-col items-center gap-3 sm:flex-row" style={{ ["--d" as string]: "720ms" }}>
           <Link
-            to="/ops"
+            to="/report"
             className="group inline-flex h-12 items-center gap-2.5 rounded-full bg-fog-100 px-7 text-[14.5px] font-medium text-ink-950 shadow-[0_10px_40px_-10px_rgba(207,194,255,0.55)] transition hover:bg-white active:scale-[0.98]"
           >
-            Launch Simulation
+            Report a hazard
             <ArrowRight size={16} weight="bold" className="transition-transform duration-300 group-hover:translate-x-0.5" />
           </Link>
-          <a
-            href="#how"
+          <Link
+            to="/ops"
             className="glass inline-flex h-12 items-center gap-2 rounded-full px-6 text-[14.5px] text-fog-100 transition hover:bg-white/10 active:scale-[0.98]"
           >
-            Explore the System <ArrowDown size={15} />
-          </a>
+            Operator console
+          </Link>
         </div>
       </div>
     </section>
@@ -151,7 +151,7 @@ function Hero() {
 }
 
 const FLOW = [
-  { verb: "Report", agent: "Citizen", text: "A resident describes flooding at the Sector 4 Underpass in their own words." },
+  { verb: "Report", agent: "Citizen", text: "A resident pins a hazard on the map of Mangaluru and describes it. No account needed." },
   { verb: "Triage", agent: "Sentinel", text: "Structures the report, separates facts from inferences, and pulls synthetic sensor evidence." },
   { verb: "Propose", agent: "Mobility + Grid", text: "Mobility routes evacuees on the road graph. Grid isolates a flooded substation." },
   { verb: "Validate", agent: "Validator", text: "Deterministic rules check every route, dependency, target and piece of evidence." },
@@ -200,27 +200,28 @@ function ConflictStory() {
             Two agents, each right on their own. Together, unsafe.
           </h2>
           <p className="mt-6 max-w-[52ch] text-[15px] leading-relaxed text-fog-400">
-            Grid isolates the flooded Sector 4 substation. Mobility sends evacuees along Evacuation Route R3. Neither
-            knows that R3 crosses Meridian Cross, whose only signal is powered by that substation. The validator traces
-            the dependency on the city graph, blocks the plan, and Mobility reroutes before anyone is asked to approve.
+            Utility isolates a flooded feeder zone. Mobility routes the fire crew across the signalised junction on
+            George Fernandes Road. Neither knows that, in the simulated power model, that signal is fed only by the
+            isolated zone. The validator traces the dependency, blocks the plan, and Mobility reroutes on the real road
+            graph before anyone is asked to approve.
           </p>
           <Link to="/ops" className="mt-8 inline-flex items-center gap-2 text-sm font-medium text-lilac-200 underline-offset-4 hover:underline">
-            Run this scenario in the simulator <ArrowRight size={15} />
+            See it in the operator console <ArrowRight size={15} />
           </Link>
         </div>
         <figure className="panel relative p-6 sm:p-8">
           <div className="grid gap-3">
-            <Chip icon={<Lightning size={18} />} label="Substation S4 isolated" sub="Grid / Utility proposal" tone="grid" />
+            <Chip icon={<Lightning size={18} />} label="Feeder zone 2B isolated" sub="Utility proposal (simulated power model)" tone="grid" />
             <div className="ml-7 h-5 w-px bg-white/15" aria-hidden />
-            <Chip icon={<TrafficSignal size={18} />} label="Signal T12 goes dark" sub="Only feed: S4" tone="bad" />
+            <Chip icon={<TrafficSignal size={18} />} label="Signal on George Fernandes Road goes dark" sub="Real OSM signal; simulated feed" tone="bad" />
             <div className="ml-7 h-5 w-px bg-white/15" aria-hidden />
-            <Chip icon={<Path size={18} />} label="Route R3 crosses Meridian Cross" sub="Mobility proposal, plan v1" tone="mob" />
+            <Chip icon={<Path size={18} />} label="Fire-station route crosses that junction" sub="Mobility proposal, plan v1" tone="mob" />
             <div className="my-2 flex items-center gap-3 text-xs text-fog-500">
               <span className="h-px flex-1 bg-white/10" /> validator blocks v1, coordinator revises <span className="h-px flex-1 bg-white/10" />
             </div>
-            <Chip icon={<ArrowsClockwise size={18} />} label="Plan v2 reroutes via Ridgeway" sub="Revalidated, then sent for approval" tone="ok" />
+            <Chip icon={<ArrowsClockwise size={18} />} label="Plan v2 reroutes on the road graph" sub="Revalidated, then sent for approval" tone="ok" />
           </div>
-          <figcaption className="mt-6 text-xs text-fog-500">Relationships taken from the simulated city graph used by the backend.</figcaption>
+          <figcaption className="mt-6 text-xs text-fog-500">Demo scenario A: an illustrative location on real OpenStreetMap roads. Sensors and power network are simulated.</figcaption>
         </figure>
       </div>
     </section>
@@ -267,7 +268,7 @@ function Architecture() {
           <Graph size={26} className="text-volt-400" />
           <h3 className="mt-5 font-display text-xl font-medium text-fog-100">City graph</h3>
           <p className="mt-2 text-sm leading-relaxed text-fog-400">
-            Fictional roads, signals, substations and synthetic sensors. Routes are computed, never generated.
+            Real OpenStreetMap roads of Mangaluru, one-way aware. Routes are computed on the graph, never generated.
           </p>
         </article>
         <article className="rounded-2xl border border-white/[0.07] bg-ink-900 p-7 md:col-span-2">
@@ -293,13 +294,13 @@ export default function LandingPage() {
         <section className="mx-auto max-w-[1280px] px-4 pb-24 sm:px-6 lg:px-10">
           <div className="relative overflow-hidden rounded-3xl border border-white/[0.08] bg-[radial-gradient(80%_140%_at_50%_120%,rgba(243,184,245,0.18),transparent_60%),var(--color-ink-900)] px-6 py-16 text-center">
             <h2 className="mx-auto max-w-[24ch] font-display text-3xl font-light tracking-[-0.03em] text-fog-100 sm:text-4xl">
-              Watch the conflict get caught, revised and approved.
+              See a hazard? Pin it on the map. Operators take it from there.
             </h2>
             <Link
-              to="/ops"
+              to="/report"
               className="mt-8 inline-flex h-12 items-center gap-2.5 rounded-full bg-fog-100 px-7 text-[14.5px] font-medium text-ink-950 transition hover:bg-white active:scale-[0.98]"
             >
-              Launch Simulation <ArrowRight size={16} weight="bold" />
+              Report a hazard <ArrowRight size={16} weight="bold" />
             </Link>
           </div>
         </section>

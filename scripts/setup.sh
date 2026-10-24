@@ -46,6 +46,9 @@ step "Installing backend dependencies"
 "$VENV_PY" -m pip install --upgrade pip
 "$VENV_PY" -m pip install -r "$BACKEND/requirements.txt"
 
+step "Ensuring GRIDPULSE_SECRET_KEY in .env"
+"$VENV_PY" "$BACKEND/scripts/ensure_secret.py"
+
 cd "$BACKEND"
 if [[ $SKIP_DB -eq 0 ]]; then
   step "Creating PostgreSQL role and databases (never drops anything)"
@@ -65,5 +68,6 @@ fi
 
 echo
 echo "Setup complete."
+echo "  First admin (once): cd backend && .venv/bin/python -m app.cli operator create <username> --role admin"
 echo "  Backend:  ./scripts/start-backend.sh"
 echo "  Frontend: cd frontend && npm run dev   (then open http://localhost:5173)"

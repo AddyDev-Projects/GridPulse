@@ -62,6 +62,10 @@ try {
     & $VenvPython -m pip install -r (Join-Path $Backend 'requirements.txt')
     Assert-Exit 'Installing backend\requirements.txt'
 
+    Step 'Ensuring GRIDPULSE_SECRET_KEY in .env'
+    & $VenvPython (Join-Path $Backend 'scripts\ensure_secret.py')
+    Assert-Exit 'Generating the secret key'
+
     Push-Location $Backend
     try {
         if (-not $SkipDatabase) {
@@ -92,6 +96,7 @@ try {
 
     Write-Host ''
     Write-Host 'Setup complete.' -ForegroundColor Green
+    Write-Host '  First admin (once): cd backend; .\.venv\Scripts\python.exe -m app.cli operator create <username> --role admin'
     Write-Host '  Backend:  powershell -ExecutionPolicy Bypass -File scripts\start-backend.ps1'
     Write-Host '  Frontend: cd frontend; npm run dev   (then open http://localhost:5173)'
 }

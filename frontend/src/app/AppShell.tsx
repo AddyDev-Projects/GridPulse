@@ -19,9 +19,9 @@ function Header() {
       isActive ? "bg-white/[0.09] text-fog-100" : "text-fog-400 hover:bg-white/[0.05] hover:text-fog-100");
   return (
     <header className="sticky top-0 z-[1000] border-b border-white/[0.06] bg-ink-950/85 backdrop-blur-xl">
-      <div className="mx-auto flex h-16 max-w-[1440px] items-center gap-3 px-4 sm:px-6">
+      <div className="mx-auto flex h-16 max-w-[1440px] items-center gap-2 px-4 sm:gap-3 sm:px-6">
         <Link to="/" aria-label="GridPulse landing page" className="shrink-0"><BrandMark /></Link>
-        <nav aria-label="Console" className="ml-2 flex items-center gap-1 sm:ml-6">
+        <nav aria-label="Console" className="flex items-center gap-1 sm:ml-6">
           <NavLink to="/ops" end className={navCls}><SquaresFour size={16} /> <span className="hidden sm:inline">Operations</span></NavLink>
           <NavLink to="/ops/city" className={navCls}><MapTrifold size={16} /> <span className="hidden sm:inline">City map</span></NavLink>
         </nav>
@@ -37,7 +37,7 @@ function Header() {
               Sentinel: {s.llm_mode === "fallback" ? "rule-based" : s.llm_mode.replace("_", "-")}
             </span>
           )}
-          <span className="rounded-full bg-warn/10 px-2.5 py-1 font-mono tracking-[0.12em] text-warn ring-1 ring-inset ring-warn/30">SIMULATION</span>
+          <span className="rounded-full bg-warn/10 px-2 py-1 font-mono tracking-normal text-warn sm:px-2.5 sm:tracking-[0.12em] ring-1 ring-inset ring-warn/30">SIMULATION</span>
           {me.data && (
             <span className="hidden items-center gap-1.5 text-fog-300 md:inline-flex">
               <UserCircle size={16} /> {me.data.username}

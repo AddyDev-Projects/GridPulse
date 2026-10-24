@@ -15,7 +15,7 @@ from app.geo.road_graph import mangaluru_graph
 from app.main import app
 from app.models import AuditEvent, Incident, RoadClosure, SimulationExecution
 from app.simulation.scenarios import SCENARIOS
-from app.tests.conftest import Api, alembic_config, make_operator
+from app.tests.conftest import Api, alembic_config, make_operator, truncate_all
 
 A = SCENARIOS["flood_conflict"]
 
@@ -272,7 +272,28 @@ def test_audit_trail_is_append_only(db, operator):
     db.rollback()
 
 
+def test_startup_is_idempotent_when_overlay_rows_lost_their_label(db):
+    db.execute(text("UPDATE infrastructure_nodes SET dataset = 'legacy_meridian_bay'"))
+    db.execute(text("UPDATE infrastructure_edges SET dataset = 'legacy_meridian_bay'"))
+    db.commit()
+    with TestClient(app):
+        pass
+    assert db.execute(text("select count(*) from infrastructure_nodes where dataset = 'mangaluru_sim'")).scalar() == 19
+
+
+def test_downgrade_refuses_rather_than_dropping_road_graph_routes(admin, pending, migrated_db):
+    plan = pending["plans"][-1]
+    decide(admin, plan, "approve")
+    assert admin.post(f"/api/plans/{plan['id']}/execute").status_code == 200
+    with pytest.raises(RuntimeError, match="Cannot downgrade below 0002"):
+        command.downgrade(alembic_config(), "0001")
+    with migrated_db.connect() as conn:
+        assert conn.execute(text("select version_num from alembic_version")).scalar() == "0003"
+        assert conn.execute(text("select count(*) from simulation_routes where city_id is not null")).scalar() > 0
+
+
 def test_migrations_match_models_and_roundtrip(migrated_db):
+    truncate_all(migrated_db)
     with migrated_db.connect() as conn:
         assert compare_metadata(MigrationContext.configure(conn), Base.metadata) == []
     cfg = alembic_config()

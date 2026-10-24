@@ -172,7 +172,15 @@ body {
   scrollbar-color: var(--color-ink-600) transparent;
 }
 
-/* Leaflet on the dark console theme */
+/* Leaflet on the dark console theme. OSM tiles are light; invert them for the dark UI. */
+.gp-dark-tiles .leaflet-tile {
+  filter: invert(100%) hue-rotate(180deg) brightness(92%) contrast(88%) saturate(60%);
+}
+/* Hide hairline seams between tiles at fractional zoom. */
+.gp-dark-tiles .leaflet-tile-container img {
+  width: 256.6px !important;
+  height: 256.6px !important;
+}
 .leaflet-container {
   font-family: var(--font-sans);
   background: var(--color-ink-900);

@@ -3,26 +3,9 @@ import { Link } from "react-router";
 import { ShieldCheck, ShieldWarning, Lightning, ArrowsClockwise, CheckCircle, Prohibit } from "@phosphor-icons/react";
 import { useIncidentContext } from "./IncidentLayout";
 import { ActionRow, FindingCard } from "./shared";
-import { useDecision, useExecute, useRevalidate } from "../../hooks/queries";
+import { useDecision, useExecute, useMe, useRevalidate } from "../../hooks/queries";
 import { Badge, Button, Empty, InlineError, Panel, StatusBadge, clock, cx } from "../../components/ui";
 import type { Plan } from "../../types/api";
-
-const OPERATOR_KEY = "gridpulse.operator";
-
-function readOperator() {
-  try {
-    return localStorage.getItem(OPERATOR_KEY) ?? "";
-  } catch {
-    return "";
-  }
-}
-function saveOperator(v: string) {
-  try {
-    localStorage.setItem(OPERATOR_KEY, v);
-  } catch {
-    /* storage unavailable: name just isn't remembered */
-  }
-}
 
 function PlanIdentity({ plan }: { plan: Plan }) {
   const v = plan.latest_validation;
@@ -54,7 +37,7 @@ function ExecutionResult({ plan }: { plan: Plan }) {
     <Panel title={<span className="flex items-center gap-2"><CheckCircle size={18} weight="fill" className="text-ok" /> Executed in the simulation</span>}
       action={<Badge tone="ok">state v{ex.state_version_before} → v{ex.state_version_after}</Badge>}>
       <p className="text-sm text-fog-400">
-        {ex.executed_by} executed plan v{plan.version} at {clock(ex.executed_at)}. {ex.notes} Only the fictional city state changed.
+        {ex.executed_by} executed plan v{plan.version} at {clock(ex.executed_at)}. {ex.notes}
       </p>
       <ul className="mt-4 grid gap-2">
         {ex.results.map((r) => (
@@ -83,7 +66,7 @@ function ExecutionResult({ plan }: { plan: Plan }) {
 export default function ApprovalTab() {
   const { wf } = useIncidentContext();
   const plan = wf.plans[wf.plans.length - 1];
-  const [operator, setOperator] = useState(readOperator);
+  const me = useMe();
   const [note, setNote] = useState("");
   const [confirm, setConfirm] = useState<null | "approve" | "reject" | "execute">(null);
   const approve = useDecision("approve");
@@ -93,18 +76,16 @@ export default function ApprovalTab() {
 
   if (!plan) return <Empty title={wf.running ? "Waiting for a validated plan" : "No plan to review"} />;
 
-  const op = operator.trim();
-  const opValid = /^[\w .'-]{1,80}$/.test(op);
-  const decisionBody = { operator: op, plan_version: plan.version, content_hash: plan.content_hash, note: note.trim() || undefined };
+  const opValid = Boolean(me.data);
+  const decisionBody = { plan_version: plan.version, content_hash: plan.content_hash, note: note.trim() || undefined };
   const lastError = approve.error ?? reject.error ?? execute.error ?? revalidate.error;
   const activeApproval = plan.approvals.find((a) => a.decision === "approved" && a.status === "active");
   const blocking = plan.latest_validation?.findings.filter((f) => f.severity !== "info") ?? [];
   const escalated = plan.status === "ESCALATED" || plan.status === "INVALID";
 
   const act = (kind: "approve" | "reject" | "execute") => {
-    saveOperator(op);
     const done = { onSettled: () => setConfirm(null) };
-    if (kind === "execute") execute.mutate({ planId: plan.id, operator: op }, done);
+    if (kind === "execute") execute.mutate(plan.id, done);
     else (kind === "approve" ? approve : reject).mutate({ planId: plan.id, body: decisionBody }, done);
   };
 
@@ -172,13 +153,8 @@ export default function ApprovalTab() {
 
           {!plan.execution && plan.status !== "REJECTED" && !escalated && (
             <>
-              <div className="grid gap-2">
-                <label htmlFor="operator" className="text-sm text-fog-300">Operator name</label>
-                <input id="operator" value={operator} onChange={(e) => setOperator(e.target.value)} maxLength={80}
-                  aria-invalid={op.length > 0 && !opValid}
-                  className="h-11 rounded-xl border border-white/10 bg-ink-900 px-4 text-sm text-fog-100 focus:border-lilac-300/60 focus:outline-none" />
-                {op.length > 0 && !opValid && <p className="text-xs text-bad">Use letters, numbers, spaces, apostrophes, dots or hyphens.</p>}
-              </div>
+              <p className="text-sm text-fog-300">Deciding as <span className="text-fog-100">{me.data?.username}</span>
+                {me.data?.role === "admin" ? " (admin)" : ""}. Your account is recorded with the decision.</p>
 
               {plan.status === "AWAITING_APPROVAL" && (
                 <div className="grid gap-2">
@@ -195,7 +171,7 @@ export default function ApprovalTab() {
               {plan.status === "STALE" && (
                 <div className="grid gap-2 rounded-xl bg-warn/[0.06] p-3 ring-1 ring-inset ring-warn/20">
                   <p className="text-sm text-warn">The city changed after this plan was validated or approved. It must be revalidated and approved again.</p>
-                  <Button variant="ghost" disabled={!opValid} loading={revalidate.isPending} onClick={() => { saveOperator(op); revalidate.mutate({ planId: plan.id, operator: op }); }}>
+                  <Button variant="ghost" disabled={!opValid} loading={revalidate.isPending} onClick={() => revalidate.mutate(plan.id)}>
                     <ArrowsClockwise size={15} /> Revalidate against current state
                   </Button>
                 </div>
@@ -236,14 +212,14 @@ export default function ApprovalTab() {
                   )}
                 </div>
               )}
-              {!opValid && plan.status !== "STALE" && <p className="text-xs text-fog-500">Enter your operator name to enable decisions.</p>}
             </>
           )}
 
           <InlineError error={lastError} />
           <p className="text-xs leading-relaxed text-fog-500">
-            The server enforces every rule here: approval binds this exact version, hash and city state, execution
-            revalidates first, and duplicate requests are refused.
+            The server enforces every rule here: only signed-in operators can decide, approval binds this exact version,
+            hash and city state, execution revalidates first, and duplicate requests are refused. Execution changes only
+            the simulation; nothing is dispatched in the real world.
           </p>
         </div>
       </div>

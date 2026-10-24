@@ -1,71 +1,130 @@
 # GridPulse
 
-**Agentic AI for the Cities of the Future.** GridPulse is a hackathon prototype of a multi-agent urban emergency-response **simulation**. Specialised agents share evidence and propose actions, a deterministic validator catches conflicts between them, the coordinator revises the plan, and a human operator approves the exact plan version before anything changes in the simulated city.
+**Agentic AI for the Cities of the Future, on the real map of Mangaluru.**
 
-> **Simulation only.** Meridian Bay is fictional. All sensor readings are synthetic and seeded by scenario. GridPulse is not connected to any real traffic signal, power system, dispatch service, SCADA or sensor network.
+GridPulse is a hackathon prototype of a disaster-response coordination system for Mangaluru, Karnataka:
+1. Citizens report hazards anonymously.
+2. Specialised agents assess each report and plan a response on the city's real OpenStreetMap road network.
+3. A deterministic validator catches conflicts between the agents' proposals.
+4. An authenticated operator approves or rejects the exact plan version.
+5. Only then does the *simulated* city state change.
 
-## The 60-second story (Scenario A)
+> **Simulation.** Roads, junctions, traffic-signal locations and emergency facilities are real OpenStreetMap data.
+> Sensors, the power network, road closures and all "executions" are simulated and labelled as such. GridPulse does
+> not dispatch real services and has no live sensor or traffic feed. In an emergency, call 112.
 
-1. A resident reports flooding at the **Sector 4 Underpass**.
-2. **Sentinel** structures the report (facts / inferences / unknowns) and retrieves synthetic water-level readings that corroborate it, including water entering the **S4 substation vault**.
-3. **Mobility** closes the underpass and routes evacuees along **Evacuation Route R3** via Meridian Cross (NetworkX, 2,700 m).
-4. **Grid/Utility** isolates **S4** because of the vault flooding.
-5. The **validator** traces `S4 → T12 → Meridian Cross`: isolating S4 darkens signal T12, which controls an intersection on the evacuation route. Plan v1 is **blocked**.
-6. The **coordinator** routes the finding back. Mobility reroutes via Ridgeway (3,700 m, +1,000 m); Grid's backup-feed alternative is recorded as viable but not selected. Plan **v2** is created and **revalidated**.
-7. The operator approves **v2** (bound to its content hash and the city state version) and executes it. Only now does the persisted simulated city change.
-8. Everything above is in the PostgreSQL audit trail.
+## What is real, configured, simulated, or missing
 
-Other scenarios: **B** stale/contradictory evidence (high-impact actions blocked, plan revised to verification-first), **C** no safe plan (no route and no energized backup feed, so the coordinator escalates and the city is untouched), **D** rejection (same data as A; reject and verify nothing changes).
+| Capability | Status |
+|---|---|
+| Mangaluru road graph (7,348 junctions, 9,151 segments, one-way aware) from OSM | **Implemented and tested** (`backend/data/mangaluru`, ODbL) |
+| Routing that avoids closures and reports "no route" | **Implemented and tested** |
+| Hospitals, fire station, police stations, traffic-signal locations | **Real OSM data**. Coverage is limited: one fire station and 5 signals are mapped in the area |
+| Anonymous citizen reporting with rate limits and abuse controls | **Implemented and tested** |
+| Operator accounts (Argon2id), sessions, CSRF, role-based access control, provisioning CLI | **Implemented and tested** |
+| Agent workflow, validator, revision, versioned approval, transactional execution, append-only audit | **Implemented and tested** |
+| Sentinel LLM triage (Gemini via OpenAI-compatible endpoint, or Claude) | **Requires configuration**. Rule-based fallback otherwise. Live Gemini call verified earlier with `gemini-3.5-flash-lite` |
+| Basemap tiles (tile.openstreetmap.org) | **External service** under the OSM tile usage policy (light use, attribution). Needs internet; nothing else depends on it. Use your own or a commercial tile provider for production |
+| Sensors and sensor readings | **Simulated**. They exist only while an explicitly loaded demo scenario is active |
+| Power network (feeder zones and signal power) | **Simulated, illustrative**. No utility data is available |
+| Road closures, routes and "execution" of plans | **Simulated**. Recorded in the database only |
+| Live traffic, live sensors, real dispatch, SMS or notifications | **Not available** |
+
+## Two experiences
+
+| | Citizen (public) | Operator (authenticated) |
+|---|---|---|
+| Entry | `/report`, `/status` | `/operator/login`, then `/ops` |
+| Account | None. No name or phone number is asked for | Created by an administrator with the CLI. There is no self sign-up |
+| Can do | Pin a hazard on the map, describe it, tick urgency indicators, get a reference (e.g. `GP-7K2M9QXA`), track its status, view confirmed incidents and simulated closures | Review the queue; confirm or dismiss reports; run the agents; inspect evidence, routes, dependencies, findings and plan versions; approve, reject or execute; view the audit trail |
+| Sees | Coarse status labels; incident locations rounded to about 100 m; closures | Full report, assessment, evidence, agent outputs, plans, audit |
+| Cannot | Call any operator endpoint. The backend returns 401 regardless of what the browser sends | Act as admin unless their role is admin (demo scenarios need admin) |
+
+Every permission is enforced in the backend (`app/api/deps.py`). The frontend only hides controls for convenience.
 
 ## Architecture
 
 ```
-frontend/  React 19 + TypeScript + Vite + Tailwind v4 + TanStack Query + React Router
-backend/   FastAPI + SQLAlchemy 2 + Alembic + PostgreSQL + NetworkX + Pydantic
-  app/agents/         sentinel.py (LLM or rules), evidence.py, mobility.py, grid.py
-  app/orchestration/  coordinator.py (state machine), revision.py (bounded remediation)
-  app/validation/     validator.py (rules R1–R7), actions.py (action allowlist)
-  app/simulation/     city.py, scenarios.py, state.py (graph logic), repository.py
-  app/services/       decisions.py (approve / reject / revalidate / execute), plans.py, audit.py
-  app/llm/            provider.py (fallback | openai_compatible | anthropic)
+frontend/  React 19 + TypeScript + Vite + Tailwind v4 + TanStack Query + React Router + Leaflet
+  features/public     citizen report form, status lookup, public safety map
+  features/auth       operator sign-in
+  features/dashboard  report queue, overview map, demo-scenario controls (admin)
+  features/incidents  overview, plans and validation, approval, audit
+  features/map        Leaflet map: OSM tiles, routes from backend geometry, routing-graph overlay
+backend/   FastAPI + SQLAlchemy 2 + Alembic + PostgreSQL + NetworkX + Pydantic + argon2-cffi
+  app/geo             osm.py (Overpass build of the graph), road_graph.py (load, route, spatial index)
+  app/agents          sentinel.py, evidence.py, geo_context.py, mobility.py, grid.py
+  app/orchestration   coordinator.py (state machine), revision.py
+  app/validation      validator.py (R1–R7), actions.py (allowlist)
+  app/simulation      state.py (snapshot), infrastructure.py (simulated overlay), scenarios.py, repository.py
+  app/services        auth.py, reports.py, decisions.py, ratelimit.py, plans.py, audit.py
+  app/api             public.py (anonymous), auth.py, routes.py (operator), deps.py (authorization)
+  app/cli.py          operator provisioning, geodata, demo scenarios
 ```
 
-Responsibilities are split deliberately:
+### The city and its graph
 
-| Concern | Who decides |
-|---|---|
-| Interpreting free-text reports | Sentinel: LLM if configured, else transparent keyword rules; output schema-validated and location grounded against a gazetteer |
-| Evidence freshness / corroboration | Deterministic code over synthetic observations |
-| Routes | NetworkX weighted shortest path (Dijkstra) on the road graph |
-| Power dependencies | NetworkX dependency graph (substation → signal → intersection) |
-| Safety | `validate_plan()`. No LLM involved, and it can block anything |
-| Revision | Deterministic remediation policy driven by validator findings, max `GRIDPULSE_MAX_REVISIONS` (default 2) |
-| Authorization | Server-side: approval bound to plan id + version + SHA-256 content hash + city `state_version` |
-| State change | `execute()` only, in one transaction, after a fresh pre-execution validation |
+`Mangaluru` is a row in `cities`: name, state, country, centre and coverage box. Each loaded OSM extract is a row in
+`road_graph_versions`, with its SHA-256, OSM timestamp and counts. Exactly one version is active.
 
-### Workflow states
+The road graph is the city's street network:
+- **Nodes** are road junctions (OSM node ids such as `n288094800`).
+- **Edges** are road segments between junctions (ids such as `w164559538s0`), with geometry, one-way direction and an estimated travel time.
 
-`REPORTED → TRIAGED → EVIDENCE_GATHERED → PLANS_PROPOSED → VALIDATING → (REVISION_REQUIRED → VALIDATING_AGAIN)* → AWAITING_APPROVAL → APPROVED → EXECUTED`, with terminal `REJECTED`, `ESCALATED` (revision limit hit), `NO_SAFE_PLAN` (no remediation exists) and `FAILED`. Every transition is persisted in `workflow_transitions`. The workflow runs as a background task, and the UI polls it while it runs. Runs interrupted by a restart are marked `FAILED` on startup.
+The city is not one node of the graph. Incidents, closures and graph versions all reference the city. The graph file
+is loaded into memory once at startup and verified against its checksum. Dynamic state is kept in PostgreSQL:
+closures and caution segments in `road_closures`, and the simulated overlay in `infrastructure_nodes/edges`
+(dataset `mangaluru_sim`).
+
+### Workflow
+
+`REPORTED → TRIAGED → EVIDENCE_GATHERED → PLANS_PROPOSED → VALIDATING → (REVISION_REQUIRED → VALIDATING_AGAIN)* → AWAITING_APPROVAL → APPROVED → EXECUTED`,
+with terminal states `DISMISSED`, `REJECTED`, `ESCALATED`, `NO_SAFE_PLAN` and `FAILED`.
+- Operators start the workflow by hand. Nothing runs on submission.
+- Every transition is persisted.
+- A run interrupted by a restart is marked `FAILED`.
+
+### Agents
+
+| Agent | Purpose | Inputs → outputs | How it works | Failure modes | Tests |
+|---|---|---|---|---|---|
+| **Sentinel** (triage) | Structure the citizen's text | Report text, chosen category, indicators, nearest road → `SentinelAssessment` (facts, inferences, unknowns, urgency, confidence) | LLM with a strict schema, or transparent keyword rules. Location always comes from the map pin; a model-proposed location is discarded | Provider error or timeout, or malformed or refused output → rule-based fallback, recorded (`fallback_used`, audit `llm.fallback`) | `test_agents.py`, `test_llm_provider.py` |
+| **Sentinel** (evidence) | Decide how well the hazard is supported | IncidentGeo, synthetic sensor rows, operator confirmation → `EvidenceAssessment` | Deterministic: freshness window, thresholds, contradictions → CORROBORATED / OPERATOR_CONFIRMED / CONTRADICTORY / STALE / UNCORROBORATED | No sensors → UNCORROBORATED. Never invents readings | `test_agents.py` |
+| **Geo context** | Put the report on the graph | lat/lon, category, indicators → nearest segment and node, hazard radius, segments in the hazard area, simulated feeder zone | Spatial index and point-to-polyline distance. Radius is a stated per-category assumption (flood 150 m, ×1.3 if water is rising) | Outside coverage or no road within 400 m → no road actions, escalated | `test_agents.py` |
+| **Mobility** | Close roads and plan response routes | Snapshot, assessment, evidence, geo → `close_roads` and `designate_response_route` actions with real edge paths | Dijkstra by estimated travel time on the one-way-aware graph, from the nearest reachable OSM fire station (police as fallback) to a reachable perimeter point; medical transfer to the nearest reachable OSM hospital | No path → reported as failed; the coordinator escalates with NO_SAFE_PLAN | `test_geo.py`, `test_agents.py` |
+| **Grid / Utility** | Act on the simulated power model | Evidence, overlay → `isolate_substation` (feeder zone) | Graph traversal: feeder zone → signals that lose their only active feed → junctions they control | Isolates only on corroborated or operator-confirmed zone evidence | `test_agents.py` |
+| **Coordinator** | Orchestrate | All of the above | Explicit state machine; persists runs, proposals, plan versions, validation; bounded revision (`GRIDPULSE_MAX_REVISIONS`, default 2) | Any exception → FAILED with no state change; revision impossible → NO_SAFE_PLAN; limit reached → ESCALATED | `test_workflow.py` |
+| **Validator** | Independent safety authority | Actions, snapshot, evidence | Rules R1–R7 below. No LLM. Runs at plan time, on revalidation and immediately before execution | Blocking finding → the plan cannot be approved or executed | `test_agents.py`, `test_workflow.py` |
 
 ### Validator rules
 
 | Rule | Checks |
 |---|---|
-| R1 Road safety | Route continuity; no closed roads, no roads the plan closes, no roads with a reported hazard |
-| R2 Infrastructure dependency | Projects utility actions onto the dependency graph; blocks routes through intersections whose signals go dark; reports downstream effects |
-| R3 Action validity | Allowlisted action types, correct target kinds, strict parameter schemas, valid power transfers |
-| R4 Approval required | Reports high-impact actions; execution is impossible without an approval of this exact version |
-| R5 Stale state | Plan / approval checked against a different `state_version` must be revalidated and re-approved |
-| R6 Evidence | High-impact actions require CORROBORATED evidence; stale / degraded sensors raise warnings |
-| R7 Unresolved conflict | Added by the coordinator when revision is impossible or the limit is reached |
+| R1 Road safety | Route is a valid, direction-aware traversal of the real graph; no closed segments, none closed by the same plan, none inside the reported hazard area |
+| R2 Infrastructure dependency | Projects utility actions onto the dependency graph; blocks routes through junctions whose (real OSM) signal would lose its (simulated) power |
+| R3 Action validity | Allowlisted action types, existing targets of the right kind, strict parameter schemas, valid feed transfers |
+| R4 Approval required | Reports high-impact actions; execution requires an operator approval of this exact version |
+| R5 Stale state | A plan validated or approved against an older city state must be revalidated and re-approved |
+| R6 Evidence | High-impact actions need sensor-corroborated or operator-confirmed evidence. Otherwise the plan is revised to verification-first (caution, field check, advisory) |
+| R7 Unresolved | Added when no remediation exists or the revision limit is reached |
 
-### Safeguards worth knowing
+### Safeguards
 
-- `UNIQUE(simulation_executions.plan_id)` plus a `SELECT … FOR UPDATE` on the simulation row makes double execution impossible (tested with 4 concurrent requests).
-- A partial unique index allows at most one active approval per plan.
-- Any reset or execution bumps `state_version`, so earlier validations and approvals go **stale automatically**. Execute then returns 409 `stale_approval` and the UI offers *Revalidate*.
-- Execution failure rolls back every change (tested by injecting a failure mid-write).
-- Model failures fall back to rules and are recorded (`fallback_used`, audit `llm.fallback`). The validator still runs.
+- **Approval binding:** an approval records the operator's account, the plan version, the content hash and the city state version. A mismatch or a later state change voids it.
+- **No duplicate execution:** `UNIQUE(simulation_executions.plan_id)` plus a row lock serialise execution. Tested with 4 concurrent requests: exactly one succeeds.
+- **Atomic execution:** a failed execution rolls back completely. Audit events are append-only, enforced by a PostgreSQL trigger.
+- **Sessions:** only SHA-256 hashes of session and CSRF tokens are stored. Cookies are HttpOnly and SameSite=Strict, with Secure configurable. Sessions expire after 12 h, or 2 h idle.
+- **Brute force:** 5 failed logins per username per 15 min, with an identical error for unknown users and wrong passwords.
+- **Abuse controls:** 5 reports per 10 min and 20 per day per client (keyed by HMAC; raw IPs are not stored), a honeypot field, 64 KB request bodies, and a coverage-area check.
+
+## Data sources and external services
+
+| Service | Used for | Required? | Credentials | When unavailable |
+|---|---|---|---|---|
+| OpenStreetMap via the Overpass API | Building the road-graph file (`python -m app.cli geodata fetch`) | Only to rebuild | None (sends a User-Agent) | Use the committed graph file; nothing at runtime calls Overpass |
+| OpenStreetMap tile server | Map background in the browser | Optional | None (attribution shown on the map) | Grey map background; routes, closures and the road-graph overlay still draw from the backend |
+| Gemini (OpenAI-compatible endpoint) or Anthropic | Sentinel triage text | Optional | `GRIDPULSE_LLM_*` in `.env` | Rule-based triage, clearly labelled; the validator is unaffected |
+| PostgreSQL 16 | All persistent state | Yes | `GRIDPULSE_DATABASE_URL` | Backend refuses to start |
 
 ## Setup
 
@@ -91,9 +150,10 @@ Each setup script, in order:
 2. Creates `backend/.venv` and installs `backend/requirements.txt`.
 3. Runs `backend/scripts/db_setup.py`, which creates the role and the two databases named in `.env`. It never drops, resets or re-passwords anything.
 4. Runs `alembic upgrade head` on the development database.
-5. Runs `npm ci` in `frontend/`.
+5. Generates `GRIDPULSE_SECRET_KEY` in `.env` if it still says `CHANGE_ME` (`backend/scripts/ensure_secret.py`).
+6. Runs `npm ci` in `frontend/`.
 
-Re-running a setup script is safe.
+Re-running a setup script is safe. After the first setup, create the first administrator (see *Operator accounts*).
 
 ### Configuration (`.env`)
 
@@ -107,6 +167,8 @@ On Windows: `Copy-Item .env.example .env`. `.env` lives in the repository root a
 |---|---|---|
 | `GRIDPULSE_DATABASE_URL` | yes | Development database, e.g. `postgresql+psycopg://gridpulse:<password>@localhost:5432/gridpulse`. You choose the password; setup creates the role with it |
 | `GRIDPULSE_TEST_DATABASE_URL` | for tests | Must be a different database whose name ends in `_test`. The test suite wipes it |
+| `GRIDPULSE_SECRET_KEY` | yes | ≥ 32 random characters; keys the HMAC of client addresses used for rate limiting. Setup generates it |
+| `GRIDPULSE_COOKIE_SECURE` | yes for production | `true` (default) sends session cookies over HTTPS only. Set `false` only for local http development |
 | `GRIDPULSE_PG_ADMIN_USER` / `GRIDPULSE_PG_ADMIN_PASSWORD` | for setup | PostgreSQL superuser used only by `db_setup.py` (and as the Docker container's password). The running app never uses them |
 | `GRIDPULSE_LLM_*`, `GRIDPULSE_WORKFLOW_STEP_DELAY_MS`, ... | no | See comments in `.env.example` |
 
@@ -205,7 +267,8 @@ On first start the backend seeds the fictional city with Scenario A, but only if
 | http://127.0.0.1:8000/api/health | `{"status":"ok", ...}`: the API process is up |
 | http://127.0.0.1:8000/api/ready | `"database":"ok"`, `"migration":"0001"`: connected and migrated |
 | `backend/scripts/db_setup.py --check` | `OK` for the development and test databases |
-| http://localhost:5173 | Landing page; the console's header shows the scenario and city state version |
+| http://localhost:5173/report | Citizen report form with the Mangaluru map (no sign-in) |
+| http://localhost:5173/ops | Redirects to operator sign-in until you log in |
 
 PowerShell: `Invoke-RestMethod http://127.0.0.1:8000/api/ready`. macOS/Linux: `curl http://127.0.0.1:8000/api/ready`.
 
@@ -213,6 +276,11 @@ PowerShell: `Invoke-RestMethod http://127.0.0.1:8000/api/ready`. macOS/Linux: `c
 
 | Symptom | Cause and fix |
 |---|---|
+| `GRIDPULSE_SECRET_KEY must be at least 32 random characters` | Run `backend/scripts/ensure_secret.py`, or the setup script |
+| Sign-in works but every console request returns 401 over plain http | `GRIDPULSE_COOKIE_SECURE=true` makes the browser drop the cookie on http. Use `false` locally or serve over HTTPS |
+| `Too many failed sign-in attempts` (429) | 5 failures per username per 15 min. Wait, or reset the password with the CLI |
+| `GRIDPULSE_LLM_MODEL looks like a placeholder` | Set a real model id or `GRIDPULSE_LLM_PROVIDER=fallback` |
+| Map tiles do not load | The basemap comes from tile.openstreetmap.org (needs internet). Routing and the road overlay still work offline |
 | `ConfigurationError: GRIDPULSE_DATABASE_URL is not set` | No `.env` in the repository root, or the variable is missing. Copy `.env.example` to `.env` |
 | `... still uses the placeholder from .env.example` | Replace every `CHANGE_ME` in `.env` |
 | `... must be a PostgreSQL URL` | GridPulse only supports PostgreSQL. Use `postgresql+psycopg://...` |
@@ -227,56 +295,108 @@ PowerShell: `Invoke-RestMethod http://127.0.0.1:8000/api/ready`. macOS/Linux: `c
 | Docker: `Set GRIDPULSE_PG_ADMIN_PASSWORD in .env` | Compose reads that variable from the root `.env` |
 
 
-## Running the demo
+## Operator accounts
 
-1. Landing page → **Launch Simulation**.
-2. Pick a scenario card → **Load scenario** (resets the fictional city).
-3. **Submit and run agents** with the prefilled synthetic report. The workflow stepper animates as the coordinator progresses (`GRIDPULSE_WORKFLOW_STEP_DELAY_MS` controls pacing).
-4. **Plans and validation**: the conflict on the graph, findings, before/after diff, alternatives, and the uncoordinated-vs-GridPulse comparison.
-5. **Approval**: enter an operator name, approve v2, then execute. Or reject (Scenario D).
-6. **City graph** and **Audit trail** show the persisted result.
+Accounts are created only with the CLI, run from `backend/` with the virtual environment's Python:
+- Windows: `.\.venv\Scripts\python.exe -m app.cli ...`
+- macOS/Linux: `.venv/bin/python -m app.cli ...`
 
-To demonstrate a stale approval: approve a plan, then reset the city from the dashboard, then try to execute. The backend refuses and the plan becomes STALE.
+Passwords are typed twice at a hidden prompt, are never printed or logged, and are stored only as Argon2id hashes.
+There is no default account.
+
+| Task | Command |
+|---|---|
+| First administrator (once) | `python -m app.cli operator create <username> --role admin` |
+| Another operator | `python -m app.cli operator create <username>` |
+| Reset a password (revokes their sessions) | `python -m app.cli operator set-password <username>` |
+| Disable / re-enable (disable revokes sessions) | `python -m app.cli operator disable <username>` / `enable <username>` |
+| Change role | `python -m app.cli operator set-role <username> admin\|operator` |
+| Sign someone out everywhere | `python -m app.cli operator revoke-sessions <username>` |
+| List accounts | `python -m app.cli operator list` |
+
+Rules:
+- `create` refuses if the username exists. It never resets an existing account.
+- Passwords must be at least 12 characters, must not contain the username, and must not be very repetitive or common.
+- For automation, `--password-stdin` reads one line from stdin. Without it, the CLI refuses a non-interactive stdin.
+
+Check that a citizen cannot reach operator functions (expect `401` from both commands):
+
+```bash
+curl -i -X POST http://127.0.0.1:8000/api/plans/00000000-0000-0000-0000-000000000000/execute
+```
+
+```bash
+curl -i http://127.0.0.1:8000/api/incidents
+```
+
+## Demo walkthrough
+
+1. **Citizen:** open http://localhost:5173/report, tap the map, describe the hazard, tick indicators, then **Send report**. Note the reference.
+2. **Operator:** sign in at http://localhost:5173/operator/login. The report is at the top of the queue.
+3. Open it. The Overview shows the pin, the nearest real road and the reporter's indicators.
+   - Click **Confirm hazard** if you have verified it (recorded with your name), then **Run agent workflow**.
+   - Without confirmation and without sensors, the evidence is UNCORROBORATED, so the plan becomes verification-first (caution, field check, advisory). This is intended.
+4. **Plans and validation** shows the routes on the map, drawn from the exact segments the validator checked, plus findings, revisions and alternatives.
+5. **Approval**: approve, then **Execute in simulation**. Or reject: nothing changes.
+6. The citizen's `/status?ref=GP-…` now shows the result. Confirmed incidents and simulated closures appear on the public map.
+
+### Demo scenarios (admin; simulated data)
+
+Load from **Operations → Demo scenarios**, or with `python -m app.cli demo load <key>`. Each creates labelled synthetic
+sensors at an illustrative location on real roads, plus a simulated report in the queue. `demo clear` lifts all
+simulated closures; it deletes nothing.
+
+| Key | Shows |
+|---|---|
+| `flood_conflict` (A) | The fire-station route crosses the real OSM signal on George Fernandes Road. The simulated isolation of feeder zone 2B would darken it. The validator blocks v1; Mobility reroutes on the graph (+0.6 km); v2 passes |
+| `stale_evidence` (B) | A stale high reading plus a fresh dry reading gives CONTRADICTORY evidence, so the plan is revised to verification-first |
+| `no_safe_plan` (C) | A simulated closure of Tannirbaavi Beach Road cuts off the area within the mapped box. No route exists, so the incident escalates. In reality the area also connects north, outside the box; this is a coverage limitation, documented as such |
+| `approval_rejection` (D) | Same data as A; reject the plan and confirm nothing changes |
+
+How the A and C locations were chosen: by searching the graph for points where the access route crosses a signal
+that has a detour (A), and for points with a minimum edge cut of one segment between the hazard perimeter and every
+responder base (C). Loading a scenario re-checks that it still applies to the current graph.
 
 ## LLM provider
 
-The hackathon "Astra" credits could not be inspected from this machine: no credentials or provider documentation were available, and a web search suggests GPT-6 Astra (OpenAI). GridPulse therefore ships with a provider abstraction and runs in **fallback mode by default**:
-
 | `GRIDPULSE_LLM_PROVIDER` | Behaviour |
 |---|---|
-| `fallback` (default) | Rule-based Sentinel, no network. Clearly labelled "Rule-based fallback" in the UI |
-| `openai_compatible` | Any Chat Completions endpoint. Set `GRIDPULSE_LLM_BASE_URL`, `GRIDPULSE_LLM_API_KEY`, `GRIDPULSE_LLM_MODEL` (use this for Astra if it exposes such an API) |
-| `anthropic` | Claude via the official Anthropic SDK with structured outputs. Set `GRIDPULSE_LLM_API_KEY`; model defaults to `claude-opus-5-5`; server-side refusal fallbacks enabled |
+| `fallback` (default) | Rule-based Sentinel; no network |
+| `openai_compatible` | Any Chat Completions endpoint, e.g. Gemini at `https://generativelanguage.googleapis.com/v1beta/openai/` with a model such as `gemini-3.5-flash-lite` |
+| `anthropic` | Claude via the Anthropic SDK (model defaults to `claude-opus-5-5`) |
 
-Only Sentinel's triage uses a model. Outputs are Pydantic-validated, model-proposed locations must exist in the gazetteer, calls have a timeout and bounded retries, and any failure falls back to rules. Keys stay server-side.
+The configuration is checked at startup: a missing key or model, or a placeholder model name, stops the backend with
+a clear message. Requests have a timeout. Permanent 4xx errors are not retried. Provider error text is shown with
+keys redacted. Output is schema-validated and the location is grounded to the map pin. The validator never consults
+the model.
 
 ## Tests
 
-Tests use **only** the database in `GRIDPULSE_TEST_DATABASE_URL`. The suite migrates it down and up and truncates every table. It refuses to start if that URL is missing, if the database name does not end in `_test`, or if it points at the same database as `GRIDPULSE_DATABASE_URL`. Development data is never touched. Create the test database with the setup script, or with `scripts/db_setup.py`.
+The backend suite uses only `GRIDPULSE_TEST_DATABASE_URL`. That database must end in `_test` and must differ from
+the dev database. The suite drops and recreates that database's schema at the start of each run; development data is never touched.
 
-Windows (from `backend\`):
-
-```powershell
-.\.venv\Scripts\python.exe -m pytest
-```
-
-macOS / Linux (from `backend/`):
+From `backend/`:
 
 ```bash
 .venv/bin/python -m pytest
 ```
 
-59 backend tests. They cover:
-- **Core logic:** routing, dependency traversal, evidence classification, every validator rule, and real revision (reroute, backup power, verification-first, no-safe-plan).
-- **Agents:** Sentinel fallback and grounding.
-- **End to end:** the full Scenario A flow.
-- **Safeguards:** rejection, unapproved/invalid execution, version/hash binding, stale approval and revalidation, escalation, revision limit, provider failure, duplicate and concurrent execution, rollback on failure, and persistence across an app restart.
-- **API and schema:** API contracts, migration/model parity, and a downgrade/upgrade round trip.
-- **Configuration:** a missing, placeholder or non-PostgreSQL URL fails clearly without echoing secrets, and the test database cannot be the development database.
+Windows: `.\.venv\Scripts\python.exe -m pytest`
 
-Migration drift check (from `backend/`, venv Python): `python -m alembic check`.
+116 backend tests, by area:
 
-Frontend (same commands on all platforms, from `frontend/`):
+| File | Covers |
+|---|---|
+| `test_geo.py` | Graph checksum, connectivity, one-way, closures, no-route, spatial queries |
+| `test_agents.py` | Evidence, Sentinel grounding, Mobility, Grid, every validator rule, revision paths |
+| `test_auth.py` | Argon2id, login, throttling, CSRF, RBAC, anonymous denial, CLI provisioning |
+| `test_public.py` | Anonymous reporting, validation, rate limit, size limit, public views leak nothing private |
+| `test_workflow.py` | Citizen → operator → agents → approval → execution end to end; rejection; no-route; stale approval; concurrent execution; rollback; provider failure; legacy read-only; startup creates no data; append-only audit; migrations, including a refused downgrade |
+| `test_config.py`, `test_llm_provider.py` | Configuration and provider behaviour |
+
+LLM tests use a mocked HTTP layer; they do not call a live model.
+
+Frontend, from `frontend/`:
 
 ```bash
 npm run typecheck
@@ -294,13 +414,33 @@ npm test
 npm run build
 ```
 
+The frontend tests cover:
+- Citizen reporting without login, client-side validation, and the server's error shown on refusal.
+- The public map, and the sign-in redirect on 401.
+- Admin-only controls hidden from operators.
+- CSRF header handling and open-redirect protection.
+- A real Leaflet render.
+
+Migration drift check, from `backend/`: `.venv/bin/python -m alembic check`.
+
+## Database migrations
+
+| Revision | What it does | Effect on existing data |
+|---|---|---|
+| 0001 | Initial schema | n/a |
+| 0002 | Adds cities, road-graph versions, road closures, operators, sessions, rate-limit events; adds citizen-report columns to incidents and operator ids to approvals and executions; repoints `simulation_routes` from fictional nodes to graph node ids; adds the append-only trigger on `audit_events` | Additive. Existing incidents are labelled `legacy` (read-only); fictional-city nodes are kept under dataset `legacy_meridian_bay`. Downgrading below 0002 is refused once routes on the real graph exist (the old schema cannot hold them); restore a backup instead |
+| 0003 | Check constraints: `DISMISSED` status, incident source, coordinate ranges | Constraint-only; existing rows satisfy it |
+
+On first start after 0002, the backend registers Mangaluru and bumps the city state version, so legacy plans become
+stale. Back up before migrating a database you care about:
+`pg_dump -Fc -d gridpulse -f backups/gridpulse.dump` (the `backups/` folder is git-ignored).
+
 ## Known limitations
 
-- Hackathon prototype, not production. No authentication: the operator name is self-declared.
-- Any city-state change invalidates outstanding approvals (deliberately conservative), even if it doesn't touch the plan.
-- Pre-execution validation reuses the evidence captured during the workflow rather than re-querying sensors.
-- Revision strategies are deterministic and specific to the action types in the allowlist; Mobility and Grid do not use an LLM.
-- The live LLM paths (`openai_compatible`, `anthropic`) are implemented but were not exercised against a real endpoint (no credentials). Fallback mode is what was tested.
-- `prefers-reduced-motion` behaviour is covered by component tests; it was not emulated in a real browser.
-- **Not verified on Windows.** Everything was built and tested on macOS with Homebrew PostgreSQL 16. The Windows side was checked as far as possible from macOS: a Windows dependency resolution, a download of every Windows wheel for Python 3.12, a check that the npm lockfile includes the Windows native bindings, and ASCII-only PowerShell scripts. `setup.ps1` and `start-backend.ps1` have not been run on Windows.
-- Docker Compose was not run (Docker was not installed on the build machine).
+- Hackathon prototype, not production. There is no TLS termination, no account lockout notification, and no multi-factor authentication.
+- Road data is a snapshot (`osm_base_timestamp` in `geodata info`). Travel times are free-flow estimates, not live traffic.
+- Only one fire station and 5 traffic signals are mapped in OSM inside the coverage box; routes start from that fire station or, failing that, police stations.
+- The coverage box crops the city. Some edge areas look like dead ends that are not (see Scenario C).
+- Rate limits key on the direct client address. Behind a reverse proxy, every client would share one key; `X-Forwarded-For` is deliberately not trusted.
+- Pre-execution validation reuses the evidence captured during the workflow, and any change to city state makes outstanding approvals stale (deliberately conservative).
+- Windows scripts are written and their dependencies were resolved for Windows, but they have not been run on Windows. Docker Compose has not been run.

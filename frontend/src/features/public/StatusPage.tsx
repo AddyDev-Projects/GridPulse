@@ -34,7 +34,7 @@ function Lookup() {
                 <Badge tone={TONE[status.data.status] ?? "neutral"}>{humanize(status.data.status)}</Badge>
                 <span className="text-xs text-fog-500">{humanize(status.data.category)} · reported {timeAgo(status.data.submitted_at)}</span>
               </div>
-              <p className="mt-2 text-sm text-fog-200">{status.data.status_label}</p>
+              <p className="mt-2 text-sm text-fog-100">{status.data.status_label}</p>
               {status.data.public_note && <p className="mt-2 text-sm text-warn">{status.data.public_note}</p>}
               <p className="mt-2 text-xs text-fog-500">Last updated {timeAgo(status.data.updated_at)}</p>
             </div>

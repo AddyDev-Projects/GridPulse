@@ -49,14 +49,15 @@ function ReportQueue() {
       {rows.map((i) => (
         <li key={i.id}>
           <button type="button" onClick={() => navigate(`/ops/incidents/${i.id}`)}
-            className="group flex w-full items-center gap-4 rounded-lg px-2 py-3.5 text-left transition hover:bg-white/[0.03]">
+            className="group flex w-full items-center gap-3 rounded-lg px-2 py-3.5 sm:gap-4 text-left transition hover:bg-white/[0.03]">
             <Siren size={20} className={i.status === "REPORTED" ? "text-orchid-300" : "text-fog-500"} />
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2 text-xs">
-                <span className="font-mono text-lilac-200">{i.reference}</span>
+                <span className="whitespace-nowrap font-mono text-lilac-200">{i.reference}</span>
                 <span className="text-fog-300">{humanize(i.category ?? "other")}</span>
                 <SourceBadge source={i.source} />
                 {i.verified_at && <Badge tone="accent">confirmed</Badge>}
+                <span className="sm:hidden"><StatusBadge status={i.status} /></span>
               </div>
               <p className="mt-1 truncate text-sm text-fog-100">{i.report_text}</p>
               <p className="mt-0.5 text-xs text-fog-500">
@@ -64,7 +65,7 @@ function ReportQueue() {
                 {!i.is_current_epoch ? " · before the current simulated state" : ""}
               </p>
             </div>
-            <StatusBadge status={i.status} />
+            <span className="hidden sm:inline-flex"><StatusBadge status={i.status} /></span>
             <CaretRight size={16} className="text-fog-500 transition group-hover:translate-x-0.5" />
           </button>
         </li>

@@ -69,10 +69,10 @@ export default function CityPage() {
       {o && (
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
           <Panel title="Simulated feeder zones">
-            <ul className="grid gap-1.5">
+            <ul className="grid grid-cols-1 gap-1.5">
               {o.zones.map((z) => (
                 <li key={z.id} className="flex items-center justify-between gap-3 text-sm">
-                  <span className="text-fog-300"><span className="mr-2 font-mono text-xs text-fog-500">{z.id}</span>{z.name}</span>
+                  <span className="min-w-0 truncate text-fog-300"><span className="mr-2 font-mono text-xs text-fog-500">{z.id}</span>{z.name}</span>
                   <StatusBadge status={z.status === "energized" ? "APPROVED" : z.status.toUpperCase()} />
                 </li>
               ))}
@@ -80,7 +80,7 @@ export default function CityPage() {
             <p className="mt-3 text-xs text-fog-500">Illustrative 3×3 grid over the coverage area. GridPulse has no utility data.</p>
           </Panel>
           <Panel title="Traffic signals and sensors">
-            <ul className="grid gap-1.5">
+            <ul className="grid grid-cols-1 gap-1.5">
               {o.nodes.map((n) => (
                 <li key={n.id} className="flex items-center justify-between gap-3 text-sm">
                   <span className="min-w-0 truncate text-fog-300">{n.name}</span>

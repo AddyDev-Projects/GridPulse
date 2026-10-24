@@ -54,7 +54,7 @@ def create_report(
         s, w, n, e = graph.bbox
         raise ReportError(422, "outside_coverage",
                           f"The location is outside GridPulse's mapped Mangaluru coverage area "
-                          f"({s:.3f}–{n:.3f}°N, {w:.3f}–{e:.3f}°E). Move the pin inside the shaded area.")
+                          f"({s:.3f} to {n:.3f}°N, {w:.3f} to {e:.3f}°E). Move the pin inside the dashed outline.")
     now = utcnow()
     if observed_at is not None:
         if observed_at.tzinfo is None:

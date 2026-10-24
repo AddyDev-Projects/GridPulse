@@ -90,8 +90,14 @@ def ensure_initialized(db: Session, graph: RoadGraph | None = None) -> None:
         graph_changed = True
 
     nodes, edges = build_overlay(graph)
-    existing_nodes = {r.id for r in db.scalars(select(InfrastructureNode).where(InfrastructureNode.dataset == DATASET_CURRENT))}
     junctions = {ed.target for ed in edges if ed.kind == "controls"}
+    wanted_nodes = junctions | {nd.id for nd in nodes}
+    # Match by id regardless of dataset label, so a row this module created earlier is never inserted twice
+    # (e.g. after a migration round trip reset the label to its server default).
+    existing_nodes = set()
+    for row in db.scalars(select(InfrastructureNode).where(InfrastructureNode.id.in_(wanted_nodes))):
+        existing_nodes.add(row.id)
+        row.dataset = DATASET_CURRENT
     for jid in sorted(junctions - existing_nodes):
         lat, lon = graph.nodes[jid]
         db.add(InfrastructureNode(id=jid, kind="intersection", name=graph.node_label(jid), zone="road-graph", x=lon, y=lat,
@@ -101,7 +107,10 @@ def ensure_initialized(db: Session, graph: RoadGraph | None = None) -> None:
         if nd.id not in existing_nodes:
             db.add(_node_row(nd))
     db.flush()
-    existing_edges = {r.id for r in db.scalars(select(InfrastructureEdge).where(InfrastructureEdge.dataset == DATASET_CURRENT))}
+    existing_edges = set()
+    for row in db.scalars(select(InfrastructureEdge).where(InfrastructureEdge.id.in_({ed.id for ed in edges}))):
+        existing_edges.add(row.id)
+        row.dataset = DATASET_CURRENT
     for ed in edges:
         if ed.id not in existing_edges:
             db.add(InfrastructureEdge(id=ed.id, kind=ed.kind, source_id=ed.source, target_id=ed.target, name=ed.name,

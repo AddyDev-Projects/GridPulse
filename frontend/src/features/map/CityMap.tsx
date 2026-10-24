@@ -15,9 +15,9 @@ import { publicApi } from "../../services/api";
 import type { City, Closure, LatLng, OverlayNode, Poi, RoadSegment, Zone } from "../../types/api";
 import { cx } from "../../components/ui";
 
-export const TILE_URL = "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png";
-export const TILE_ATTRIBUTION =
-  '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>';
+// Standard OpenStreetMap tiles (tile usage policy: light use, attribution required). Darkened with CSS to fit the theme.
+export const TILE_URL = "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
+export const TILE_ATTRIBUTION = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
 
 export const COLORS = {
   closed: "#ff7186",
@@ -144,7 +144,7 @@ export function CityMap({
       role="region" aria-label={ariaLabel ?? `Map of ${city.name}`}>
       <MapContainer bounds={coverage} maxBounds={[[s - 0.05, w - 0.05], [n + 0.05, e + 0.05]]} minZoom={12} maxZoom={19}
         className="h-full w-full bg-ink-900" scrollWheelZoom style={{ cursor: onPick ? "crosshair" : undefined }}>
-        <TileLayer url={TILE_URL} attribution={TILE_ATTRIBUTION} subdomains="abcd" maxZoom={19} />
+        <TileLayer url={TILE_URL} attribution={TILE_ATTRIBUTION} maxZoom={19} className="gp-dark-tiles" />
         <Rectangle bounds={coverage} pathOptions={{ color: "#b4a2fb", weight: 1, dashArray: "6 6", fill: false, opacity: 0.6 }}>
           <Tooltip sticky>GridPulse coverage area (mapped road graph)</Tooltip>
         </Rectangle>

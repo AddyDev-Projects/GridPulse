@@ -184,7 +184,7 @@ export default function ReportPage() {
           </div>
         </form>
 
-        <div className="grid min-w-0 content-start gap-3">
+        <div className="order-first grid min-w-0 content-start gap-3 lg:order-none">
           <div className="flex items-center justify-between gap-3">
             <p className="text-sm text-fog-300">Tap the map where the hazard is</p>
             <Button type="button" variant="ghost" className="h-9 px-4" onClick={useMyLocation}>

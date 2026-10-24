@@ -42,10 +42,13 @@ def alembic_config() -> Config:
 
 @pytest.fixture(scope="session", autouse=True)
 def migrated_db():
-    cfg = alembic_config()
-    command.downgrade(cfg, "base")
-    command.upgrade(cfg, "head")
+    # Rebuild the (guarded, *_test) database from an empty schema so leftovers from a previous run or a
+    # manual session against it cannot break the reset.
     engine = configure_engine(TEST_URL)
+    with engine.begin() as conn:
+        conn.execute(text("DROP SCHEMA public CASCADE"))
+        conn.execute(text("CREATE SCHEMA public"))
+    command.upgrade(alembic_config(), "head")
     yield engine
     engine.dispose()
 
@@ -58,10 +61,14 @@ TABLES = (
 )
 
 
+def truncate_all(engine) -> None:
+    with engine.begin() as conn:
+        conn.execute(text(f"TRUNCATE {TABLES} RESTART IDENTITY CASCADE"))
+
+
 @pytest.fixture()
 def db(migrated_db):
-    with migrated_db.begin() as conn:
-        conn.execute(text(f"TRUNCATE {TABLES} RESTART IDENTITY CASCADE"))
+    truncate_all(migrated_db)
     session = session_factory()()
     ensure_initialized(session)
     session.commit()
