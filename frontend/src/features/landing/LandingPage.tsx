@@ -153,7 +153,7 @@ function Hero() {
 const FLOW = [
   { verb: "Report", agent: "Citizen", text: "A resident pins a hazard on the map of Mangaluru and describes it. No account needed." },
   { verb: "Triage", agent: "Sentinel", text: "Structures the report, separates facts from inferences, and pulls synthetic sensor evidence." },
-  { verb: "Propose", agent: "Mobility + Grid", text: "Mobility routes evacuees on the road graph. Grid isolates a flooded substation." },
+  { verb: "Propose", agent: "Mobility + Traffic + Grid", text: "Mobility routes responders, AnalyseTraffic checks disruption and route conflicts, and Grid models utility dependencies." },
   { verb: "Validate", agent: "Validator", text: "Deterministic rules check every route, dependency, target and piece of evidence." },
   { verb: "Revise", agent: "Coordinator", text: "Findings go back to the responsible agent. A new plan version is checked again." },
   { verb: "Decide", agent: "Operator", text: "A human approves or rejects the exact plan version. Only then does the simulated city change." },
@@ -261,7 +261,7 @@ function Architecture() {
           <Brain size={26} className="text-volt-400" />
           <h3 className="mt-5 font-display text-xl font-medium text-fog-100">Agents</h3>
           <p className="mt-2 text-sm leading-relaxed text-fog-400">
-            Sentinel triages reports with an LLM or transparent fallback rules. Mobility and Grid plan on NetworkX graphs.
+             Sentinel triages reports with an LLM or transparent fallback rules. Mobility, AnalyseTraffic and Grid plan on deterministic NetworkX-backed data.
           </p>
         </article>
         <article className="rounded-2xl border border-white/[0.07] bg-[linear-gradient(160deg,rgba(106,168,255,0.12),transparent_60%),var(--color-ink-900)] p-7 md:col-span-2">

@@ -1,5 +1,5 @@
 import "leaflet/dist/leaflet.css";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   CircleMarker,
   MapContainer,
@@ -14,6 +14,7 @@ import type { LatLngBoundsExpression, LatLngExpression } from "leaflet";
 import { publicApi } from "../../services/api";
 import type { City, Closure, LatLng, OverlayNode, Poi, RoadSegment, Zone } from "../../types/api";
 import { cx } from "../../components/ui";
+import { GoogleMapCanvas } from "./GoogleMap";
 
 // Standard OpenStreetMap tiles (tile usage policy: light use, attribution required). Darkened with CSS to fit the theme.
 export const TILE_URL = "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
@@ -133,15 +134,13 @@ function GraphLayer() {
   );
 }
 
-export function CityMap({
-  city, className, markers = [], closures = [], routes = [], hazard = [], signals = [], zones = [], pois = [],
-  showGraph = false, focus, picked, onPick, ariaLabel,
+function LeafletMap({
+  city, markers = [], closures = [], routes = [], hazard = [], signals = [], zones = [], pois = [],
+  showGraph = false, focus, picked, onPick,
 }: CityMapProps) {
   const [s, w, n, e] = city.coverage_bbox;
   const coverage: LatLngBoundsExpression = useMemo(() => [[s, w], [n, e]], [s, w, n, e]);
   return (
-    <div className={cx("relative overflow-hidden rounded-xl ring-1 ring-white/[0.08]", className)}
-      role="region" aria-label={ariaLabel ?? `Map of ${city.name}`}>
       <MapContainer bounds={coverage} maxBounds={[[s - 0.05, w - 0.05], [n + 0.05, e + 0.05]]} minZoom={12} maxZoom={19}
         className="h-full w-full bg-ink-900" scrollWheelZoom style={{ cursor: onPick ? "crosshair" : undefined }}>
         <TileLayer url={TILE_URL} attribution={TILE_ATTRIBUTION} maxZoom={19} className="gp-dark-tiles" />
@@ -197,6 +196,37 @@ export function CityMap({
         {onPick && <PickHandler onPick={onPick} />}
         <FitTo points={focus} fallback={coverage} />
       </MapContainer>
+  );
+}
+
+const GOOGLE_MAPS_KEY = (import.meta.env.VITE_GOOGLE_MAPS_API_KEY as string | undefined)?.trim();
+const GOOGLE_TRAFFIC_LAYER = import.meta.env.VITE_GOOGLE_MAPS_TRAFFIC_LAYER === "true";
+
+export function CityMap(props: CityMapProps) {
+  const [provider, setProvider] = useState<"google" | "osm">(GOOGLE_MAPS_KEY ? "google" : "osm");
+  const [googleError, setGoogleError] = useState<string | null>(null);
+  const failGoogle = useCallback((reason: string) => {
+    setGoogleError(reason);
+    setProvider("osm");
+  }, []);
+  const providerLabel = provider === "google"
+    ? GOOGLE_TRAFFIC_LAYER ? "Google Maps · traffic layer requested" : "Google Maps · traffic layer not configured"
+    : googleError
+      ? "OpenStreetMap fallback · Google Maps unavailable"
+      : "OpenStreetMap · fallback provider";
+  return (
+    <div className={cx("relative overflow-hidden rounded-xl ring-1 ring-white/[0.08]", props.className)}
+      role="region" aria-label={props.ariaLabel ?? `Map of ${props.city.name}`}>
+      <div className="absolute right-2 top-2 z-[500] rounded-full bg-ink-950/85 px-2.5 py-1 text-[10px] text-fog-300 ring-1 ring-inset ring-white/10" title={googleError ?? undefined}>
+        {providerLabel}
+      </div>
+      <div className="h-full w-full">
+        {provider === "google" && GOOGLE_MAPS_KEY ? (
+          <GoogleMapCanvas {...props} apiKey={GOOGLE_MAPS_KEY} onFailure={failGoogle} />
+        ) : (
+          <LeafletMap {...props} />
+        )}
+      </div>
     </div>
   );
 }

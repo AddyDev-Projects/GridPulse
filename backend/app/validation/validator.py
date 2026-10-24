@@ -85,6 +85,7 @@ def validate_plan(
     evidence: EvidenceAssessment | None,
     *,
     expected_state_version: int | None = None,
+    traffic: dict[str, Any] | None = None,
 ) -> ValidationResult:
     findings: list[Finding] = []
 
@@ -140,6 +141,20 @@ def validate_plan(
 
     projected, changes = apply_actions(snapshot, valid)
     closed_by_plan = {s for a in valid if a.action_type == "close_roads" for s in _segments(a)}
+    caution_by_plan = {s for a in valid if a.action_type == "set_roads_caution" for s in _segments(a)}
+    contradictory_controls = sorted(closed_by_plan & caution_by_plan)
+    if contradictory_controls:
+        for a in valid:
+            if a.action_type != "set_roads_caution":
+                continue
+            overlap = sorted(set(_segments(a)) & set(contradictory_controls))
+            if overlap:
+                findings.append(Finding(
+                    "R1_ROAD_SAFETY", "blocking", "Contradictory road controls in one plan",
+                    f"Action #{a.seq} cautions segment(s) that another action closes: {', '.join(overlap[:6])}.",
+                    "Reconcile the traffic recommendation with the closure; a segment cannot be both closed and cautioned.",
+                    agent=a.proposed_by, action_seq=a.seq, evidence={"segments": overlap},
+                ))
     routes = [a for a in valid if a.action_type in ROUTE_ACTIONS]
 
     # R1 — road safety ------------------------------------------------------------------------
@@ -177,6 +192,26 @@ def validate_plan(
             findings.append(Finding("R1_ROAD_SAFETY", "warning", f"{p['name']} uses {len(caution)} caution segment(s)",
                                     "Some segments on the route are under caution.", "Prefer open segments if available.",
                                     agent=r.proposed_by, action_seq=r.seq, evidence={"segments": caution}))
+
+    # R8 — traffic-data quality ----------------------------------------------------------------
+    if traffic is not None:
+        live_status = traffic.get("live_traffic", "unavailable")
+        if live_status != "available":
+            findings.append(Finding(
+                "R8_TRAFFIC_DATA", "warning", "Live traffic data unavailable",
+                "Traffic impacts and travel times are estimated from the versioned OSM road graph and simulated "
+                "closures; no live congestion or signal timing was observed.",
+                "Treat the estimate as uncertain and verify current access through authorized operators before any "
+                "real-world action. GridPulse execution remains simulation-only.",
+                agent="traffic", evidence={"live_traffic": live_status, "data_source": traffic.get("data_source"),
+                                             "freshness": traffic.get("freshness")},
+            ))
+        for conflict in traffic.get("conflicts", [])[:10]:
+            findings.append(Finding(
+                "R8_TRAFFIC_DATA", "warning", "Traffic coordination consideration", conflict,
+                "Use one coordinated plan and do not add contradictory road controls.", agent="traffic",
+                evidence={"conflict": conflict},
+            ))
 
     # R2 — infrastructure dependencies --------------------------------------------------------
     utility_actions = [a for a in valid if ACTION_TYPES[a.action_type].owner == "grid"]

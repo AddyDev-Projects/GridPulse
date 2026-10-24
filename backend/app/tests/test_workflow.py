@@ -58,6 +58,9 @@ def test_citizen_report_to_operator_approval_end_to_end(admin, anon, db):
     assert detail["incident"]["lat"] == pytest.approx(A.lat, abs=1e-6) and detail["assessment"] is None
 
     wf = run(admin, inc)                                              # 5-7 agents, coordinator, validator
+    assert any(r["agent"] == "traffic" and r["step"] == "analyse" and r["status"] == "succeeded" for r in wf["agent_runs"])
+    traffic_proposal = next(p for p in admin.get(f"/api/incidents/{inc}").json()["proposals"] if p["agent"] == "traffic")
+    assert traffic_proposal["payload"]["live_traffic"] == "unavailable"
     assert [t["to_status"] for t in wf["transitions"]] == [
         "REPORTED", "TRIAGED", "EVIDENCE_GATHERED", "PLANS_PROPOSED", "VALIDATING", "REVISION_REQUIRED",
         "VALIDATING_AGAIN", "AWAITING_APPROVAL"]
@@ -65,6 +68,7 @@ def test_citizen_report_to_operator_approval_end_to_end(admin, anon, db):
     assert v1["status"] == "SUPERSEDED"
     assert any(f["rule_id"] == "R2_INFRA_DEPENDENCY" and f["severity"] == "blocking" for f in v1["latest_validation"]["findings"])
     assert v2["latest_validation"]["passed"] and v2["approvable"] and v1["content_hash"] != v2["content_hash"]
+    assert "Live traffic unavailable" in (v1["rationale"] or "")
     assert city(admin)[:3] == before[:3], "nothing changes before approval"
 
     g = mangaluru_graph()                                             # displayed route == computed route
@@ -288,7 +292,7 @@ def test_downgrade_refuses_rather_than_dropping_road_graph_routes(admin, pending
     with pytest.raises(RuntimeError, match="Cannot downgrade below 0002"):
         command.downgrade(alembic_config(), "0001")
     with migrated_db.connect() as conn:
-        assert conn.execute(text("select version_num from alembic_version")).scalar() == "0003"
+        assert conn.execute(text("select version_num from alembic_version")).scalar() == "0004"
         assert conn.execute(text("select count(*) from simulation_routes where city_id is not null")).scalar() > 0
 
 

@@ -95,6 +95,15 @@ export interface PublicIncident {
   simulated_scenario: boolean;
 }
 
+export interface PublicRecentIncident {
+  reference: string;
+  category: string;
+  location: string;
+  reported_at: string;
+  status: string;
+  status_label: string;
+}
+
 export interface Closure {
   segment_id: string;
   name: string;
@@ -260,6 +269,30 @@ export interface SentinelAssessment {
   assumptions: string[];
   recommended_next_steps: string[];
   confidence: number;
+  affected_people: string[];
+  potential_hazards: string[];
+  responder_recommendations: ResponderRecommendation[];
+  medical_need: "indicated" | "uncertain" | "not_indicated";
+  medical_need_reason: string | null;
+}
+
+export interface ResponderRecommendation {
+  responder_type: "fire_rescue" | "ambulance" | "police";
+  status: "recommended" | "consider" | "verification_required";
+  rationale: string;
+  evidence: string[];
+  confidence: number;
+}
+
+export interface FacilityRecommendation {
+  facility_id: string;
+  name: string;
+  distance_m: number;
+  travel_s: number;
+  source: string;
+  capability_status: string;
+  availability_status: string;
+  rationale: string;
 }
 
 export interface Observation {

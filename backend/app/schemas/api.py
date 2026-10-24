@@ -439,3 +439,14 @@ class PublicIncident(BaseModel):
     verified: bool
     updated_at: datetime
     simulated_scenario: bool
+
+
+class PublicRecentIncident(BaseModel):
+    """Minimal, sanitized citizen-facing summary of a recently reported incident."""
+
+    reference: str
+    category: str
+    location: str
+    reported_at: datetime
+    status: str
+    status_label: str

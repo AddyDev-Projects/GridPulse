@@ -6,6 +6,7 @@ export const keys = {
   me: ["me"] as const,
   city: ["public-city"] as const,
   publicIncidents: ["public-incidents"] as const,
+  publicRecentIncidents: ["public-recent-incidents"] as const,
   publicClosures: ["public-closures"] as const,
   reportStatus: (ref: string) => ["report-status", ref] as const,
   state: ["state"] as const,
@@ -22,6 +23,8 @@ export const keys = {
 export const useCity = () => useQuery({ queryKey: keys.city, queryFn: publicApi.city, staleTime: Infinity });
 export const usePublicIncidents = () =>
   useQuery({ queryKey: keys.publicIncidents, queryFn: publicApi.incidents, refetchInterval: 30_000 });
+export const usePublicRecentIncidents = () =>
+  useQuery({ queryKey: keys.publicRecentIncidents, queryFn: publicApi.recentIncidents, staleTime: 30_000, refetchInterval: 60_000 });
 export const usePublicClosures = () =>
   useQuery({ queryKey: keys.publicClosures, queryFn: publicApi.closures, refetchInterval: 30_000 });
 export const useReportStatus = (ref: string | null) =>

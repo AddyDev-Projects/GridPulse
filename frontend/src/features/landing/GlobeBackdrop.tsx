@@ -14,10 +14,70 @@ export const GLOBE_VIDEO =
  */
 export function GlobeBackdrop() {
   const reduced = useReducedMotion();
+  const parallaxRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const [videoReady, setVideoReady] = useState(false);
   const [videoFailed, setVideoFailed] = useState(false);
   const [stillFailed, setStillFailed] = useState(false);
+
+  useEffect(() => {
+    const root = parallaxRef.current;
+    if (!root || reduced || typeof window === "undefined") return;
+    let visible = true;
+    let frame = 0;
+    let currentX = 0;
+    let currentY = 0;
+    let targetX = 0;
+    let targetY = 0;
+    const settle = () => {
+      if (!visible) return;
+      currentX += (targetX - currentX) * 0.11;
+      currentY += (targetY - currentY) * 0.11;
+      root.style.setProperty("--globe-x", `${currentX.toFixed(2)}px`);
+      root.style.setProperty("--globe-y", `${currentY.toFixed(2)}px`);
+      root.style.setProperty("--globe-orbit-x", `${(currentX * 0.72).toFixed(2)}px`);
+      root.style.setProperty("--globe-orbit-y", `${(currentY * 0.72).toFixed(2)}px`);
+      root.style.setProperty("--globe-particle-x", `${(currentX * 1.18).toFixed(2)}px`);
+      root.style.setProperty("--globe-particle-y", `${(currentY * 1.18).toFixed(2)}px`);
+      if (Math.abs(targetX - currentX) > 0.08 || Math.abs(targetY - currentY) > 0.08) frame = window.requestAnimationFrame(settle);
+      else frame = 0;
+    };
+    const wake = () => { if (!frame) frame = window.requestAnimationFrame(settle); };
+    const move = (event: PointerEvent) => {
+      if (!visible || event.pointerType === "touch") return;
+      const rect = root.getBoundingClientRect();
+      if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) {
+        targetX = 0;
+        targetY = 0;
+      } else {
+        const x = (event.clientX - rect.left) / rect.width - 0.5;
+        const y = (event.clientY - rect.top) / rect.height - 0.5;
+        targetX = x * 22;
+        targetY = y * 14;
+      }
+      wake();
+    };
+    const leave = () => { targetX = 0; targetY = 0; wake(); };
+    const visibility = () => {
+      visible = document.visibilityState === "visible";
+      if (!visible && frame) { window.cancelAnimationFrame(frame); frame = 0; }
+      if (visible) wake();
+    };
+    const observer = typeof IntersectionObserver === "function"
+      ? new IntersectionObserver(([entry]) => { visible = entry.isIntersecting && document.visibilityState === "visible"; if (visible) wake(); }, { threshold: 0.01 })
+      : null;
+    observer?.observe(root);
+    window.addEventListener("pointermove", move, { passive: true });
+    window.addEventListener("pointerleave", leave, { passive: true });
+    document.addEventListener("visibilitychange", visibility);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerleave", leave);
+      document.removeEventListener("visibilitychange", visibility);
+      if (frame) window.cancelAnimationFrame(frame);
+    };
+  }, [reduced]);
 
   useEffect(() => {
     const v = videoRef.current;
@@ -43,9 +103,18 @@ export function GlobeBackdrop() {
   const layer = "absolute inset-0 h-full w-full object-cover object-[50%_100%]";
 
   return (
-    <div aria-hidden className="pointer-events-none absolute inset-0 overflow-hidden">
+    <div ref={parallaxRef} aria-hidden className="pointer-events-none absolute inset-0 overflow-hidden globe-parallax-root">
       {/* Globe stage: anchored to the bottom so the planet rises behind the hero copy. */}
-      <div className="absolute inset-x-0 bottom-0 h-[78%] sm:h-[86%] lg:h-[94%]">
+      <div className="globe-parallax-stage absolute inset-x-0 bottom-0 h-[78%] sm:h-[86%] lg:h-[94%]">
+        <div className="globe-orbits absolute inset-0" aria-hidden>
+          <span className="globe-orbit globe-orbit-a" />
+          <span className="globe-orbit globe-orbit-b" />
+          <span className="globe-orbit globe-orbit-c" />
+          <i className="globe-particle globe-particle-a" />
+          <i className="globe-particle globe-particle-b" />
+          <i className="globe-particle globe-particle-c" />
+          <i className="globe-particle globe-particle-d" />
+        </div>
         {/* Fallback glow when neither media layer is usable. */}
         {stillFailed && (videoFailed || reduced) && (
           <div className="absolute inset-x-[-10%] bottom-[-40%] h-[110%] rounded-[50%] bg-[radial-gradient(closest-side,rgba(10,8,16,1)_78%,rgba(240,171,252,0.5)_88%,rgba(106,168,255,0.25)_94%,transparent)]" />

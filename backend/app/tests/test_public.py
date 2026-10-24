@@ -1,9 +1,14 @@
 """Anonymous citizen portal: reporting without login, validation, abuse controls, safe public views."""
 
+from datetime import timedelta
+
 import pytest
 from sqlalchemy import select
 
+from app.db.base import utcnow
+from app.geo.road_graph import mangaluru_graph
 from app.models import AuditEvent, Incident
+from app.services.reports import create_report
 from app.simulation.scenarios import SCENARIOS
 
 A = SCENARIOS["flood_conflict"]
@@ -97,3 +102,43 @@ def test_public_city_and_segments_come_from_the_real_graph(anon):
 def test_public_cannot_see_simulated_infrastructure(anon):
     assert anon.get("/api/simulation/overlay").status_code == 401
     assert anon.get("/api/public/closures").json() == []
+
+
+def test_police_category_is_accepted_and_recent_feed_is_limited_and_sanitized(anon, db):
+    police = anon.post("/api/public/reports", json={
+        **REPORT,
+        "category": "homicide",
+        "description": "A possible homicide has been reported; do not approach the location.",
+        "indicators": ["suspected_homicide"],
+    })
+    assert police.status_code == 201, police.text
+    police_ref = police.json()["reference"]
+    stored = db.scalars(select(Incident).where(Incident.reference == police_ref)).one()
+    assert stored.category == "homicide" and stored.source == "citizen_portal"
+    assert anon.get(f"/api/public/reports/{police_ref}").json()["category"] == "police_assistance"
+
+    base = utcnow()
+    for i in range(6):
+        inc = create_report(
+            db,
+            mangaluru_graph(),
+            category="flood",
+            description=f"A public test report number {i} with enough detail.",
+            lat=A.lat,
+            lon=A.lon,
+            indicators=[],
+            location_description=None,
+            observed_at=None,
+            source="citizen_portal",
+        )
+        inc.created_at = base - timedelta(minutes=6 - i)
+    db.commit()
+
+    response = anon.get("/api/public/recent-incidents")
+    assert response.status_code == 200, response.text
+    rows = response.json()
+    assert len(rows) == 5
+    assert [row["reported_at"] for row in rows] == sorted((row["reported_at"] for row in rows), reverse=True)
+    assert all(set(row) == {"reference", "category", "location", "reported_at", "status", "status_label"} for row in rows)
+    assert not PRIVATE_KEYS & set(rows[0])
+    assert any(row["reference"] == police_ref and row["category"] == "police_assistance" and row["location"] == "Mangaluru area" for row in rows)

@@ -3,7 +3,7 @@ import { useIncidentContext } from "./IncidentLayout";
 import { AGENT_LABEL, Badge, Empty, LoadingBlock, Panel, SimTag, Skeleton, StatusBadge, clock, cx, humanize } from "../../components/ui";
 import { useCity, useOverlay } from "../../hooks/queries";
 import { COLORS, CityMap, MapLegend } from "../map/CityMap";
-import type { AgentRun, Proposal } from "../../types/api";
+import type { AgentRun, FacilityRecommendation, Proposal, ResponderRecommendation } from "../../types/api";
 
 function ListBlock({ icon, title, items, tone, hint }: { icon: React.ReactNode; title: string; items: string[]; tone: string; hint: string }) {
   return (
@@ -32,6 +32,7 @@ function ProposalCard({ p }: { p: Proposal }) {
   const reasoning = (p.payload.reasoning as string[] | undefined) ?? [];
   const uncertainty = (p.payload.uncertainty as string[] | undefined) ?? [];
   const consequences = (p.payload.consequences as { id: string; name: string; effect: string }[] | undefined) ?? [];
+  const traffic = p.agent === "traffic" ? p.payload : null;
   return (
     <li className="rounded-xl border border-white/[0.07] bg-white/[0.02] p-4">
       <div className="flex flex-wrap items-center gap-2">
@@ -52,7 +53,66 @@ function ProposalCard({ p }: { p: Proposal }) {
       {uncertainty.map((u) => (
         <p key={u} className="mt-2 text-xs text-warn">{u}</p>
       ))}
+      {traffic && (
+        <div className="mt-3 grid gap-2 rounded-lg bg-volt-400/[0.05] p-3 text-xs ring-1 ring-inset ring-volt-400/15">
+          <p className="text-fog-300">
+            Data source: <span className="text-fog-100">{String(traffic.data_source ?? "estimated")}</span> · live traffic: <span className="text-warn">{String(traffic.live_traffic ?? "unavailable")}</span> · freshness: {String(traffic.freshness ?? "unknown")}
+          </p>
+          {(traffic.traffic_management_recommendations as { action: string; detail: string; status: string }[] | undefined)?.map((r) => (
+            <p key={`${r.action}${r.detail}`} className="text-fog-400">{humanize(r.action)}: {r.detail} <span className="text-fog-500">({humanize(r.status)})</span></p>
+          ))}
+          {(traffic.alternative_routes as { name: string; length_m: number; travel_s: number }[] | undefined)?.length ? (
+            <p className="text-fog-400">Alternative route estimates available: {(traffic.alternative_routes as { name: string }[]).map((r) => r.name).join(", ")}.</p>
+          ) : null}
+        </div>
+      )}
     </li>
+  );
+}
+
+function ResponderPanel({ recommendations }: { recommendations: ResponderRecommendation[] }) {
+  return (
+    <Panel title="Responder recommendations">
+      {recommendations.length === 0 ? <Empty title="No specific responder type inferred" /> : (
+        <ul className="grid gap-3">
+          {recommendations.map((r) => (
+            <li key={r.responder_type} className="rounded-xl border border-white/[0.07] bg-white/[0.02] p-3.5">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-sm font-medium text-fog-100">{humanize(r.responder_type)}</span>
+                <Badge tone={r.status === "verification_required" ? "warn" : "accent"}>{humanize(r.status)}</Badge>
+                <span className="text-xs text-fog-500">{Math.round(r.confidence * 100)}% confidence</span>
+              </div>
+              <p className="mt-1.5 text-[13px] leading-relaxed text-fog-300">{r.rationale}</p>
+              <p className="mt-1 text-xs text-fog-500">Basis: {r.evidence.join("; ")}</p>
+            </li>
+          ))}
+        </ul>
+      )}
+      <p className="mt-3 text-xs text-fog-500">These are evidence-grounded recommendations for operator review, not dispatch confirmations.</p>
+    </Panel>
+  );
+}
+
+function FacilityPanel({ recommendations }: { recommendations: FacilityRecommendation[] }) {
+  return (
+    <Panel title="Medical facility assessment">
+      {recommendations.length === 0 ? <Empty title="No reachable hospital estimate" /> : (
+        <ul className="grid gap-3">
+          {recommendations.map((f) => (
+            <li key={f.facility_id} className="rounded-xl border border-white/[0.07] bg-white/[0.02] p-3.5">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-sm font-medium text-fog-100">{f.name}</span>
+                <Badge tone="info">{(f.distance_m / 1000).toFixed(2)} km straight-line</Badge>
+                <Badge>{Math.max(1, Math.round(f.travel_s / 60))} min estimate</Badge>
+              </div>
+              <p className="mt-1.5 text-xs leading-relaxed text-fog-400">{f.rationale}</p>
+              <p className="mt-1 text-xs text-fog-500">Capability: {f.capability_status} · availability: {f.availability_status} · {f.source}</p>
+            </li>
+          ))}
+        </ul>
+      )}
+      <p className="mt-3 text-xs text-fog-500">GridPulse does not contact or reserve a facility. Capacity, specialist services, emergency-department status, and acceptance remain unknown unless a verified source is connected.</p>
+    </Panel>
   );
 }
 
@@ -115,6 +175,8 @@ export default function OverviewTab() {
   if (!detail) return <LoadingBlock rows={4} />;
   const a = detail.assessment;
   const ev = detail.evidence;
+  const mobility = detail.proposals.find((p) => p.agent === "mobility");
+  const facilities = (mobility?.payload.facility_recommendations as FacilityRecommendation[] | undefined) ?? [];
   return (
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
       <div className="grid min-w-0 grid-cols-1 content-start gap-6 lg:col-span-7">
@@ -177,6 +239,8 @@ export default function OverviewTab() {
             <ul className="grid gap-3">{detail.proposals.map((p) => <ProposalCard key={p.id} p={p} />)}</ul>
           )}
         </Panel>
+        {a && <ResponderPanel recommendations={a.responder_recommendations ?? []} />}
+        {(a?.medical_need !== "not_indicated" || facilities.length > 0) && <FacilityPanel recommendations={facilities} />}
       </div>
 
       <div className="grid min-w-0 grid-cols-1 content-start gap-6 lg:col-span-5">

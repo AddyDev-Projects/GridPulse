@@ -11,17 +11,31 @@ const CATEGORY_LABEL: Record<string, string> = {
   fire: "Fire",
   road_obstruction: "Road blocked (tree, debris, collapse)",
   power_outage: "Power lines / electrical hazard",
+  medical_emergency: "Medical emergency",
+  accident: "Road collision / accident",
+  rescue: "Rescue request",
+  police_assistance: "Police assistance",
+  violence_assault: "Violence or assault",
+  homicide: "Homicide / suspected homicide",
+  threat_weapon: "Threat or weapon reported",
+  theft_robbery_burglary: "Theft, robbery or burglary",
+  suspicious_activity: "Suspicious activity",
   other: "Something else",
 };
 const INDICATOR_LABEL: Record<string, string> = {
   people_trapped: "People trapped",
   injuries: "Someone is injured",
+  multiple_injured: "Several people are injured",
+  person_unconscious: "Someone appears unconscious",
   vehicles_stranded: "Vehicles stuck",
   water_rising: "Water is rising",
   power_lines_down: "Power lines down",
   road_blocked: "Road completely blocked",
   fire_spreading: "Fire is spreading",
   structural_damage: "Building or wall damaged",
+  weapon_present: "Weapon seen or reported",
+  suspected_homicide: "Possible homicide reported",
+  suspect_present: "Person involved may still be present",
 };
 
 function toIsoWithZone(local: string): string | undefined {
@@ -98,7 +112,7 @@ export default function ReportPage() {
         <h1 className="font-display text-3xl font-light tracking-[-0.03em] text-fog-100">Report a hazard in Mangaluru</h1>
         <p className="mt-1 max-w-[70ch] text-sm text-fog-400">
           No sign-in needed. Your report goes to the operators' review queue; you get a reference to track it. We do not ask
-          for your name or phone number.
+          for your name or phone number. GridPulse is a reporting and coordination prototype, not a replacement for calling 112.
         </p>
       </div>
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">

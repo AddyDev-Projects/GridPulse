@@ -22,7 +22,7 @@ from sqlalchemy.orm import Session
 from app.db.base import utcnow
 from app.models import Approval, Incident, Operator, ResponsePlan, SimulationExecution, SimulationRoute
 from app.services import audit
-from app.services.plans import action_specs, content_hash, incident_context, latest_validation, store_validation
+from app.services.plans import action_specs, content_hash, incident_context, incident_traffic, latest_validation, store_validation
 from app.simulation.repository import get_meta, load_snapshot, persist_changes
 from app.simulation.state import apply_actions
 from app.validation.validator import validate_plan
@@ -139,8 +139,9 @@ def revalidate(db: Session, plan_id: uuid.UUID, op: Operator) -> ResponsePlan:
     if plan.status not in ("STALE", "AWAITING_APPROVAL"):
         raise DecisionError(409, "invalid_state", f"Plan v{plan.version} is {plan.status}; it cannot be revalidated.")
     _, evidence = incident_context(db, incident.id)
+    traffic_context = incident_traffic(db, incident.id)
     snapshot = load_snapshot(db, meta)
-    result = validate_plan(action_specs(plan), snapshot, evidence)
+    result = validate_plan(action_specs(plan), snapshot, evidence, traffic=traffic_context)
     store_validation(db, plan, result, meta.state_version, "revalidate")
     if result.passed:
         plan.status = "AWAITING_APPROVAL"
@@ -199,8 +200,10 @@ def execute(db: Session, plan_id: uuid.UUID, op: Operator) -> SimulationExecutio
 
     # Fresh deterministic validation immediately before mutating anything.
     _, evidence = incident_context(db, incident.id)
+    traffic_context = incident_traffic(db, incident.id)
     snapshot = load_snapshot(db, meta)
-    result = validate_plan(specs, snapshot, evidence, expected_state_version=appr.state_version)
+    result = validate_plan(specs, snapshot, evidence, expected_state_version=appr.state_version,
+                           traffic=traffic_context)
     store_validation(db, plan, result, meta.state_version, "pre_execution")
     if not result.passed:
         appr.status = "invalidated"

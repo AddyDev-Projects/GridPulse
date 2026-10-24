@@ -68,6 +68,7 @@ class Incident(Base, TimestampMixin):
         CheckConstraint(f"source IN {INCIDENT_SOURCES}", name="source"),
         CheckConstraint("lat IS NULL OR (lat BETWEEN -90 AND 90 AND lon BETWEEN -180 AND 180)", name="coordinates"),
         Index("ix_incidents_epoch_created", "epoch", "created_at"),
+        Index("ix_incidents_public_created", "source", "city_id", "created_at"),
         Index("ix_incidents_status", "status"),
     )
 

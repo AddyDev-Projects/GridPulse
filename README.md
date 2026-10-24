@@ -24,11 +24,13 @@ GridPulse is a hackathon prototype of a disaster-response coordination system fo
 | Operator accounts (Argon2id), sessions, CSRF, role-based access control, provisioning CLI | **Implemented and tested** |
 | Agent workflow, validator, revision, versioned approval, transactional execution, append-only audit | **Implemented and tested** |
 | Sentinel LLM triage (Gemini via OpenAI-compatible endpoint, or Claude) | **Requires configuration**. Rule-based fallback otherwise. Live Gemini call verified earlier with `gemini-3.5-flash-lite` |
+| Evidence-grounded responder recommendations and medical facility assessment | **Implemented**. Recommendations are labelled as reported/inferred; facility capability and availability remain unknown unless verified |
+| Map presentation | **Google Maps JavaScript API when configured**, with a single-attempt fallback to Leaflet + OpenStreetMap. Routing remains the local OSM/NetworkX graph |
 | Basemap tiles (tile.openstreetmap.org) | **External service** under the OSM tile usage policy (light use, attribution). Needs internet; nothing else depends on it. Use your own or a commercial tile provider for production |
 | Sensors and sensor readings | **Simulated**. They exist only while an explicitly loaded demo scenario is active |
 | Power network (feeder zones and signal power) | **Simulated, illustrative**. No utility data is available |
 | Road closures, routes and "execution" of plans | **Simulated**. Recorded in the database only |
-| Live traffic, live sensors, real dispatch, SMS or notifications | **Not available** |
+| Live traffic, live sensors, real dispatch, SMS or notifications | **Not available to the backend workflow**. The optional Google `TrafficLayer` is visual-only and is never treated as evidence or routing authority |
 
 ## Two experiences
 
@@ -36,7 +38,7 @@ GridPulse is a hackathon prototype of a disaster-response coordination system fo
 |---|---|---|
 | Entry | `/report`, `/status` | `/operator/login`, then `/ops` |
 | Account | None. No name or phone number is asked for | Created by an administrator with the CLI. There is no self sign-up |
-| Can do | Pin a hazard on the map, describe it, tick urgency indicators, get a reference (e.g. `GP-7K2M9QXA`), track its status, view confirmed incidents and simulated closures | Review the queue; confirm or dismiss reports; run the agents; inspect evidence, routes, dependencies, findings and plan versions; approve, reject or execute; view the audit trail |
+| Can do | Pin a hazard on the map, describe it, select fire/medical/accident/rescue or police categories, get a reference (e.g. `GP-7K2M9QXA`), track its status, view the five newest sanitized reports, confirmed incidents and simulated closures | Review the queue; confirm or dismiss reports; run the agents; inspect evidence, responder and hospital recommendations, traffic analysis, routes, dependencies, findings and plan versions; approve, reject or execute; view the audit trail |
 | Sees | Coarse status labels; incident locations rounded to about 100 m; closures | Full report, assessment, evidence, agent outputs, plans, audit |
 | Cannot | Call any operator endpoint. The backend returns 401 regardless of what the browser sends | Act as admin unless their role is admin (demo scenarios need admin) |
 
@@ -45,17 +47,17 @@ Every permission is enforced in the backend (`app/api/deps.py`). The frontend on
 ## Architecture
 
 ```
-frontend/  React 19 + TypeScript + Vite + Tailwind v4 + TanStack Query + React Router + Leaflet
+frontend/  React 19 + TypeScript + Vite + Tailwind v4 + TanStack Query + React Router + Google Maps JS / Leaflet fallback
   features/public     citizen report form, status lookup, public safety map
   features/auth       operator sign-in
   features/dashboard  report queue, overview map, demo-scenario controls (admin)
   features/incidents  overview, plans and validation, approval, audit
-  features/map        Leaflet map: OSM tiles, routes from backend geometry, routing-graph overlay
+  features/map        provider abstraction: Google Maps JS primary, Leaflet/OSM fallback; backend routes and graph overlay
 backend/   FastAPI + SQLAlchemy 2 + Alembic + PostgreSQL + NetworkX + Pydantic + argon2-cffi
   app/geo             osm.py (Overpass build of the graph), road_graph.py (load, route, spatial index)
-  app/agents          sentinel.py, evidence.py, geo_context.py, mobility.py, grid.py
+  app/agents          sentinel.py, evidence.py, geo_context.py, mobility.py, traffic.py, grid.py
   app/orchestration   coordinator.py (state machine), revision.py
-  app/validation      validator.py (R1–R7), actions.py (allowlist)
+  app/validation      validator.py (R1–R8), actions.py (allowlist)
   app/simulation      state.py (snapshot), infrastructure.py (simulated overlay), scenarios.py, repository.py
   app/services        auth.py, reports.py, decisions.py, ratelimit.py, plans.py, audit.py
   app/api             public.py (anonymous), auth.py, routes.py (operator), deps.py (authorization)
@@ -90,8 +92,10 @@ with terminal states `DISMISSED`, `REJECTED`, `ESCALATED`, `NO_SAFE_PLAN` and `F
 |---|---|---|---|---|---|
 | **Sentinel** (triage) | Structure the citizen's text | Report text, chosen category, indicators, nearest road → `SentinelAssessment` (facts, inferences, unknowns, urgency, confidence) | LLM with a strict schema, or transparent keyword rules. Location always comes from the map pin; a model-proposed location is discarded | Provider error or timeout, or malformed or refused output → rule-based fallback, recorded (`fallback_used`, audit `llm.fallback`) | `test_agents.py`, `test_llm_provider.py` |
 | **Sentinel** (evidence) | Decide how well the hazard is supported | IncidentGeo, synthetic sensor rows, operator confirmation → `EvidenceAssessment` | Deterministic: freshness window, thresholds, contradictions → CORROBORATED / OPERATOR_CONFIRMED / CONTRADICTORY / STALE / UNCORROBORATED | No sensors → UNCORROBORATED. Never invents readings | `test_agents.py` |
+| **Sentinel** (resources) | Infer likely responder types and treatment need | Report text, selected category/indicators → responder recommendations, affected-people and hazard statements | Deterministic evidence-grounded classification; police/crime details remain allegations and recommendations never dispatch | Ambiguous reports stay uncertain and are shown to operators for verification | `test_agents.py`, `test_workflow.py` |
 | **Geo context** | Put the report on the graph | lat/lon, category, indicators → nearest segment and node, hazard radius, segments in the hazard area, simulated feeder zone | Spatial index and point-to-polyline distance. Radius is a stated per-category assumption (flood 150 m, ×1.3 if water is rising) | Outside coverage or no road within 400 m → no road actions, escalated | `test_agents.py` |
 | **Mobility** | Close roads and plan response routes | Snapshot, assessment, evidence, geo → `close_roads` and `designate_response_route` actions with real edge paths | Dijkstra by estimated travel time on the one-way-aware graph, from the nearest reachable OSM fire station (police as fallback) to a reachable perimeter point; medical transfer to the nearest reachable OSM hospital | No path → reported as failed; the coordinator escalates with NO_SAFE_PLAN | `test_geo.py`, `test_agents.py` |
+| **AnalyseTraffic** | Analyse disruption, route conflicts and traffic-management implications | Snapshot, Mobility routes, geo, evidence → affected segments, route assessments, alternatives, recommendations, freshness | Deterministic OSM snapshot + simulated closure/caution state. Live traffic is explicitly unavailable; it never fabricates congestion | Data gap is a warning; contradictory road controls and unsafe routes remain validator-blocked | `test_agents.py`, `test_workflow.py` |
 | **Grid / Utility** | Act on the simulated power model | Evidence, overlay → `isolate_substation` (feeder zone) | Graph traversal: feeder zone → signals that lose their only active feed → junctions they control | Isolates only on corroborated or operator-confirmed zone evidence | `test_agents.py` |
 | **Coordinator** | Orchestrate | All of the above | Explicit state machine; persists runs, proposals, plan versions, validation; bounded revision (`GRIDPULSE_MAX_REVISIONS`, default 2) | Any exception → FAILED with no state change; revision impossible → NO_SAFE_PLAN; limit reached → ESCALATED | `test_workflow.py` |
 | **Validator** | Independent safety authority | Actions, snapshot, evidence | Rules R1–R7 below. No LLM. Runs at plan time, on revalidation and immediately before execution | Blocking finding → the plan cannot be approved or executed | `test_agents.py`, `test_workflow.py` |
@@ -107,6 +111,7 @@ with terminal states `DISMISSED`, `REJECTED`, `ESCALATED`, `NO_SAFE_PLAN` and `F
 | R5 Stale state | A plan validated or approved against an older city state must be revalidated and re-approved |
 | R6 Evidence | High-impact actions need sensor-corroborated or operator-confirmed evidence. Otherwise the plan is revised to verification-first (caution, field check, advisory) |
 | R7 Unresolved | Added when no remediation exists or the revision limit is reached |
+| R8 Traffic data | Live traffic is not silently assumed; the validator records a warning when route impacts use OSM/free-flow estimates or simulated state |
 
 ### Safeguards
 
@@ -123,6 +128,7 @@ with terminal states `DISMISSED`, `REJECTED`, `ESCALATED`, `NO_SAFE_PLAN` and `F
 |---|---|---|---|---|
 | OpenStreetMap via the Overpass API | Building the road-graph file (`python -m app.cli geodata fetch`) | Only to rebuild | None (sends a User-Agent) | Use the committed graph file; nothing at runtime calls Overpass |
 | OpenStreetMap tile server | Map background in the browser | Optional | None (attribution shown on the map) | Grey map background; routes, closures and the road-graph overlay still draw from the backend |
+| Google Maps JavaScript API | Optional primary browser map and optional visual `TrafficLayer` | Optional | `VITE_GOOGLE_MAPS_API_KEY` in the root `.env` | One failed load/auth attempt switches to Leaflet + OSM; no retry loop. Google traffic is not sent to or trusted by the backend workflow |
 | Gemini (OpenAI-compatible endpoint) or Anthropic | Sentinel triage text | Optional | `GRIDPULSE_LLM_*` in `.env` | Rule-based triage, clearly labelled; the validator is unaffected |
 | PostgreSQL 16 | All persistent state | Yes | `GRIDPULSE_DATABASE_URL` | Backend refuses to start |
 
@@ -171,8 +177,30 @@ On Windows: `Copy-Item .env.example .env`. `.env` lives in the repository root a
 | `GRIDPULSE_COOKIE_SECURE` | yes for production | `true` (default) sends session cookies over HTTPS only. Set `false` only for local http development |
 | `GRIDPULSE_PG_ADMIN_USER` / `GRIDPULSE_PG_ADMIN_PASSWORD` | for setup | PostgreSQL superuser used only by `db_setup.py` (and as the Docker container's password). The running app never uses them |
 | `GRIDPULSE_LLM_*`, `GRIDPULSE_WORKFLOW_STEP_DELAY_MS`, ... | no | See comments in `.env.example` |
+| `VITE_GOOGLE_MAPS_API_KEY` | no | Browser-restricted Google Maps JavaScript API key. Leave empty for local Leaflet/OSM development |
+| `VITE_GOOGLE_MAPS_TRAFFIC_LAYER` | no | Set `true` only when the Google Maps JavaScript `TrafficLayer` is enabled and authorized. This affects presentation only |
 
 If a password contains `@ : / ? # %`, URL-encode it in the URLs (`@` becomes `%40`).
+
+### Optional Google Maps setup
+
+The app remains fully usable without Google Maps. To enable the primary provider:
+
+1. In a Google Cloud project, enable **Maps JavaScript API** and configure billing as required by Google Maps Platform.
+2. Create a browser key and restrict it by HTTP referrer (for local development, the `localhost:5173` and
+   `127.0.0.1:5173` origins) and by the APIs it may call. Do not put a server credential in the frontend variable.
+3. Set `VITE_GOOGLE_MAPS_API_KEY` in the root `.env`. Optionally set `VITE_GOOGLE_MAPS_TRAFFIC_LAYER=true` to request
+   Google's supported visual traffic layer.
+4. Restart Vite. The map shows a small provider indicator. Missing keys, authorization/billing failures, network errors,
+   and map-load failures fall back to Leaflet + OpenStreetMap without retrying the failed Google request.
+
+Google Maps is a visual provider only in GridPulse. AnalyseTraffic continues to label live traffic as unavailable and
+uses the versioned OSM graph plus simulated closure/caution state. It never scrapes Google Maps or treats a basemap as
+traffic evidence. Review the current Google Maps Platform documentation and terms for pricing, quotas, attribution,
+key restrictions, and allowed uses before production deployment: [Maps JavaScript setup](https://developers.google.com/maps/documentation/javascript/get-api-key),
+[usage and billing](https://developers.google.com/maps/documentation/javascript/usage-and-billing),
+[TrafficLayer](https://developers.google.com/maps/documentation/javascript/trafficlayer), and
+[API key security guidance](https://developers.google.com/maps/api-security-best-practices).
 
 ### Windows (PowerShell)
 
@@ -383,14 +411,14 @@ From `backend/`:
 
 Windows: `.\.venv\Scripts\python.exe -m pytest`
 
-116 backend tests, by area:
+120 backend tests, by area:
 
 | File | Covers |
 |---|---|
 | `test_geo.py` | Graph checksum, connectivity, one-way, closures, no-route, spatial queries |
-| `test_agents.py` | Evidence, Sentinel grounding, Mobility, Grid, every validator rule, revision paths |
+| `test_agents.py` | Evidence, Sentinel grounding, responder/resource inference, Mobility, AnalyseTraffic, Grid, every validator rule, revision paths |
 | `test_auth.py` | Argon2id, login, throttling, CSRF, RBAC, anonymous denial, CLI provisioning |
-| `test_public.py` | Anonymous reporting, validation, rate limit, size limit, public views leak nothing private |
+| `test_public.py` | Anonymous reporting, police categories, five-report feed, validation, rate limit, size limit, public views leak nothing private |
 | `test_workflow.py` | Citizen → operator → agents → approval → execution end to end; rejection; no-route; stale approval; concurrent execution; rollback; provider failure; legacy read-only; startup creates no data; append-only audit; migrations, including a refused downgrade |
 | `test_config.py`, `test_llm_provider.py` | Configuration and provider behaviour |
 
@@ -430,6 +458,7 @@ Migration drift check, from `backend/`: `.venv/bin/python -m alembic check`.
 | 0001 | Initial schema | n/a |
 | 0002 | Adds cities, road-graph versions, road closures, operators, sessions, rate-limit events; adds citizen-report columns to incidents and operator ids to approvals and executions; repoints `simulation_routes` from fictional nodes to graph node ids; adds the append-only trigger on `audit_events` | Additive. Existing incidents are labelled `legacy` (read-only); fictional-city nodes are kept under dataset `legacy_meridian_bay`. Downgrading below 0002 is refused once routes on the real graph exist (the old schema cannot hold them); restore a backup instead |
 | 0003 | Check constraints: `DISMISSED` status, incident source, coordinate ranges | Constraint-only; existing rows satisfy it |
+| 0004 | Indexes citizen reports by source, city and creation time for the five-report public feed | Additive, no data transformation |
 
 On first start after 0002, the backend registers Mangaluru and bumps the city state version, so legacy plans become
 stale. Back up before migrating a database you care about:
@@ -439,6 +468,8 @@ stale. Back up before migrating a database you care about:
 
 - Hackathon prototype, not production. There is no TLS termination, no account lockout notification, and no multi-factor authentication.
 - Road data is a snapshot (`osm_base_timestamp` in `geodata info`). Travel times are free-flow estimates, not live traffic.
+- AnalyseTraffic has no live traffic provider in this build; its findings are explicitly estimated/unavailable and never authorize real traffic control.
+- Google Maps is optional browser presentation. A restricted browser key, billing/API authorization, quotas and provider terms require manual verification; Leaflet/OSM remains the local fallback.
 - Only one fire station and 5 traffic signals are mapped in OSM inside the coverage box; routes start from that fire station or, failing that, police stations.
 - The coverage box crops the city. Some edge areas look like dead ends that are not (see Scenario C).
 - Rate limits key on the direct client address. Behind a reverse proxy, every client would share one key; `X-Forwarded-For` is deliberately not trusted.

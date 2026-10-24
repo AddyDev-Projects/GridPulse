@@ -20,7 +20,7 @@ from typing import Any
 
 from app.geo.osm import haversine_m
 from app.geo.road_graph import Poi
-from app.schemas.agents import EvidenceAssessment, IncidentGeo, SentinelAssessment
+from app.schemas.agents import EvidenceAssessment, FacilityRecommendation, IncidentGeo, SentinelAssessment
 from app.simulation.state import CitySnapshot, RouteResult
 
 MEDICAL_INDICATORS = {"injuries", "people_trapped"}
@@ -64,6 +64,7 @@ class MobilityProposal:
     excluded_nodes: list[str]
     reasoning: list[str]
     uncertainty: list[str] = field(default_factory=list)
+    facility_recommendations: list[dict[str, Any]] = field(default_factory=list)
 
     @property
     def summary(self) -> str:
@@ -80,6 +81,7 @@ class MobilityProposal:
                        for r in self.routes],
             "failed": self.failed, "staging": self.staging, "excluded_edges": self.excluded_edges,
             "excluded_nodes": self.excluded_nodes, "reasoning": self.reasoning, "uncertainty": self.uncertainty,
+            "facility_recommendations": self.facility_recommendations,
         }
 
 
@@ -130,6 +132,41 @@ def medical_route(snapshot: CitySnapshot, geo: IncidentGeo, staging: str, exclud
     return None
 
 
+def hospital_recommendations(
+    snapshot: CitySnapshot,
+    geo: IncidentGeo,
+    staging: str,
+    exclude_edges: set[str],
+    exclude_nodes: set[str],
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """Rank reachable OSM hospital locations without claiming capability or availability."""
+    recommendations: list[dict[str, Any]] = []
+    warnings: list[str] = []
+    g = snapshot.graph
+    for h in _pois(snapshot, "hospital", geo.lat, geo.lon)[:5]:
+        near = g.nearest_node(h.lat, h.lon, 600)
+        if near is None:
+            warnings.append(f"{h.label} is not close enough to the mapped road graph for a route estimate.")
+            continue
+        route = snapshot.shortest_route(staging, near[0], exclude_edges, exclude_nodes)
+        if route is None:
+            warnings.append(f"No route estimate reaches {h.label} from the staging point under current road constraints.")
+            continue
+        recommendation = FacilityRecommendation(
+            facility_id=h.id,
+            name=h.label,
+            distance_m=round(haversine_m(geo.lat, geo.lon, h.lat, h.lon), 1),
+            travel_s=route.travel_s,
+            source="OpenStreetMap snapshot",
+            capability_status="unverified",
+            availability_status="unknown",
+            rationale=("Reachable by the current simulated road graph with an estimated free-flow travel time. "
+                       "Hospital capability, emergency-department status, beds, and acceptance are unknown."),
+        )
+        recommendations.append(recommendation.model_dump(mode="json"))
+    return recommendations, warnings
+
+
 def propose(
     snapshot: CitySnapshot,
     assessment: SentinelAssessment,
@@ -165,6 +202,7 @@ def propose(
 
     planned: list[PlannedRoute] = []
     failed: list[str] = []
+    facilities: list[dict[str, Any]] = []
     access, staging = access_route(snapshot, geo, exclude_edges, exclude_nodes)
     if access is None:
         failed.append("emergency_access")
@@ -174,7 +212,14 @@ def propose(
         planned.append(access)
         reasoning.append(f"{access.name}: {len(access.route.edge_path)} segments, {access.route.length_m:.0f} m, "
                          f"~{access.route.travel_s / 60:.1f} min estimated free-flow (not live traffic).")
-        if set(indicators) & MEDICAL_INDICATORS or assessment.urgency == "critical":
+        medical_needed = bool(set(indicators) & MEDICAL_INDICATORS) or assessment.urgency == "critical" \
+            or assessment.medical_need in ("indicated", "uncertain")
+        if medical_needed:
+            facilities, facility_warnings = hospital_recommendations(snapshot, geo, staging, exclude_edges, exclude_nodes)
+            uncertainty.extend(facility_warnings)
+            if facilities:
+                reasoning.append(f"{len(facilities)} reachable hospital candidate(s) ranked by estimated route; "
+                                 "capability and availability are unverified.")
             med = medical_route(snapshot, geo, staging, exclude_edges, exclude_nodes)
             if med is None:
                 failed.append("medical_transfer")
@@ -190,4 +235,4 @@ def propose(
     for r in planned:
         actions.append(r.action("Fastest path by estimated travel time on the OSM road graph, one-way aware."))
     return MobilityProposal(actions, planned, failed, staging or None, sorted(exclude_edges), sorted(exclude_nodes),
-                            reasoning, uncertainty)
+                            reasoning, uncertainty, facilities)

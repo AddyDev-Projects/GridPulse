@@ -26,6 +26,7 @@ from app.schemas.api import (
     CityOut,
     ClosureOut,
     PublicIncident,
+    PublicRecentIncident,
     PublicReportCreate,
     PublicReportReceipt,
     PublicReportStatus,
@@ -35,6 +36,20 @@ from app.services.reports import ReportError, create_report, public_advisory, pu
 from app.simulation.repository import get_city, get_meta
 
 router = APIRouter(prefix="/api/public", tags=["public"])
+
+SENSITIVE_PUBLIC_CATEGORIES = {
+    "police_assistance",
+    "violence_assault",
+    "homicide",
+    "threat_weapon",
+    "theft_robbery_burglary",
+    "suspicious_activity",
+}
+
+
+def public_category(category: str | None) -> str:
+    value = category or "other"
+    return "police_assistance" if value in SENSITIVE_PUBLIC_CATEGORIES else value
 
 
 @router.get("/city", response_model=CityOut)
@@ -89,7 +104,7 @@ def report_status(reference: str, db: Session = Depends(get_db)) -> PublicReport
     if inc is None:
         raise HTTPException(404, detail={"code": "not_found", "message": "No report with that reference."})
     status, label = public_status(inc)
-    return PublicReportStatus(reference=inc.reference, category=inc.category or "other", status=status,
+    return PublicReportStatus(reference=inc.reference, category=public_category(inc.category), status=status,
                               status_label=label, submitted_at=inc.created_at, updated_at=inc.updated_at,
                               public_note=public_advisory(db, inc))
 
@@ -106,11 +121,43 @@ def public_incidents(db: Session = Depends(get_db)) -> list[PublicIncident]:
     out = []
     for inc in rows:
         status, label = public_status(inc)
-        out.append(PublicIncident(reference=inc.reference, category=inc.category or "other", status=status,
+        out.append(PublicIncident(reference=inc.reference, category=public_category(inc.category), status=status,
                                   status_label=label, lat=round(inc.lat, 3), lon=round(inc.lon, 3),
                                   advisory=public_advisory(db, inc), verified=inc.verified_at is not None,
                                   updated_at=inc.updated_at, simulated_scenario=inc.source == "demo_scenario"))
     return out
+
+
+@router.get("/recent-incidents", response_model=list[PublicRecentIncident])
+def recent_public_incidents(db: Session = Depends(get_db)) -> list[PublicRecentIncident]:
+    """Return five newest citizen reports with only coarse, public-safe fields."""
+    meta = get_meta(db)
+    rows = db.scalars(
+        select(Incident)
+        .where(Incident.city_id == meta.city_id, Incident.source == "citizen_portal")
+        .order_by(Incident.created_at.desc(), Incident.id.desc())
+        .limit(5)
+    ).all()
+    graph = mangaluru_graph()
+    result: list[PublicRecentIncident] = []
+    for inc in rows:
+        if inc.reference is None:
+            continue
+        category = inc.category or "other"
+        sensitive = category in SENSITIVE_PUBLIC_CATEGORIES
+        segment = graph.segments.get(inc.segment_id) if inc.segment_id else None
+        location = "Mangaluru area" if sensitive else (f"Near {segment.label}" if segment else "Mangaluru area")
+        public_category_value = public_category(category)
+        status, label = public_status(inc)
+        result.append(PublicRecentIncident(
+            reference=inc.reference,
+            category=public_category_value,
+            location=location,
+            reported_at=inc.created_at,
+            status=status,
+            status_label=label,
+        ))
+    return result
 
 
 @router.get("/closures", response_model=list[ClosureOut])

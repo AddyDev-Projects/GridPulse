@@ -114,6 +114,8 @@ describe("public status and map", () => {
       if (url.endsWith("/public/incidents"))
         return json([{ reference: "GP-AAAA1111", category: "flood", status: "confirmed", status_label: "Confirmed by an operator",
           lat: 12.899, lon: 74.856, advisory: null, verified: true, updated_at: new Date().toISOString(), simulated_scenario: true }]);
+      if (url.endsWith("/public/recent-incidents"))
+        return json([{ reference: "GP-AAAA1111", category: "flood", location: "Near Bendoor Road", reported_at: new Date().toISOString(), status: "confirmed", status_label: "Confirmed by an operator" }]);
       if (url.endsWith("/public/closures")) return json([]);
     });
     const { default: StatusPage } = await import("../features/public/StatusPage");

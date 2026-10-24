@@ -21,6 +21,7 @@ describe("CityMap (real Leaflet in jsdom)", () => {
     );
     expect(container.querySelector(".leaflet-container")).not.toBeNull();
     expect(container.textContent).toContain("OpenStreetMap");
+    expect(container.textContent).toContain("OpenStreetMap · fallback provider");
     expect(TILE_ATTRIBUTION).toContain("openstreetmap.org/copyright");
     const paths = container.querySelectorAll("path.leaflet-interactive");
     // coverage outline + 1 route + 2 markers

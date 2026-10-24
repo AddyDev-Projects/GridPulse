@@ -10,7 +10,22 @@ from app.schemas.agents import IncidentGeo
 from app.simulation.infrastructure import zone_of
 from app.simulation.state import CitySnapshot
 
-HAZARD_RADIUS_M = {"flood": 150.0, "fire": 80.0, "road_obstruction": 30.0, "power_outage": 0.0, "other": 0.0}
+HAZARD_RADIUS_M = {
+    "flood": 150.0,
+    "fire": 80.0,
+    "road_obstruction": 30.0,
+    "accident": 35.0,
+    "rescue": 50.0,
+    "power_outage": 0.0,
+    "medical_emergency": 0.0,
+    "police_assistance": 0.0,
+    "violence_assault": 0.0,
+    "homicide": 0.0,
+    "threat_weapon": 0.0,
+    "theft_robbery_burglary": 0.0,
+    "suspicious_activity": 0.0,
+    "other": 0.0,
+}
 RISING_FACTOR = 1.3
 MAX_SNAP_M = 400.0
 

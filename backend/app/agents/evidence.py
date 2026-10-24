@@ -22,8 +22,22 @@ from app.schemas.agents import EvidenceAssessment, HazardEvidence, IncidentGeo, 
 from app.simulation.state import CitySnapshot
 
 ACTIVE_SENSOR_STATUSES = ("online", "degraded")
-CATEGORY_HAZARD = {"flood": "road_flooding", "fire": "fire", "road_obstruction": "road_obstruction",
-                   "power_outage": "power_outage", "other": "unspecified"}
+CATEGORY_HAZARD = {
+    "flood": "road_flooding",
+    "fire": "fire",
+    "road_obstruction": "road_obstruction",
+    "power_outage": "power_outage",
+    "medical_emergency": "medical_emergency",
+    "accident": "collision",
+    "rescue": "rescue_need",
+    "police_assistance": "security_hazard",
+    "violence_assault": "violence_report",
+    "homicide": "suspected_homicide",
+    "threat_weapon": "weapon_or_threat",
+    "theft_robbery_burglary": "crime_report",
+    "suspicious_activity": "suspicious_activity",
+    "other": "unspecified",
+}
 
 
 def relevant_sensors(snapshot: CitySnapshot, geo: IncidentGeo | None) -> list[str]:

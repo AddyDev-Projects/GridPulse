@@ -117,6 +117,7 @@ const RULE_NAME: Record<string, string> = {
   R5_STALE_STATE: "R5 Stale state",
   R6_EVIDENCE: "R6 Evidence",
   R7_UNRESOLVED_CONFLICT: "R7 Unresolved",
+  R8_TRAFFIC_DATA: "R8 Traffic data",
 };
 
 export function FindingCard({ f }: { f: Finding }) {

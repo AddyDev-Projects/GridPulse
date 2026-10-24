@@ -1,7 +1,7 @@
 import { useState } from "react";
-import { useSearchParams } from "react-router";
-import { MagnifyingGlass } from "@phosphor-icons/react";
-import { useCity, usePublicClosures, usePublicIncidents, useReportStatus } from "../../hooks/queries";
+import { Link, useSearchParams } from "react-router";
+import { ArrowClockwise, MagnifyingGlass } from "@phosphor-icons/react";
+import { useCity, usePublicClosures, usePublicIncidents, usePublicRecentIncidents, useReportStatus } from "../../hooks/queries";
 import { Badge, Button, Empty, ErrorState, Panel, Skeleton, humanize, timeAgo } from "../../components/ui";
 import { COLORS, CityMap, MapLegend } from "../map/CityMap";
 
@@ -48,6 +48,7 @@ function Lookup() {
 export default function StatusPage() {
   const city = useCity();
   const incidents = usePublicIncidents();
+  const recent = usePublicRecentIncidents();
   const closures = usePublicClosures();
   return (
     <div className="grid gap-6">
@@ -61,6 +62,32 @@ export default function StatusPage() {
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.6fr)]">
         <div className="grid min-w-0 content-start gap-6">
           <Lookup />
+          <Panel
+            title="Five latest reports"
+            action={<Button variant="ghost" className="h-8 px-3 text-xs" onClick={() => recent.refetch()} loading={recent.isFetching}><ArrowClockwise size={13} /> Refresh</Button>}
+          >
+            {recent.isError ? <ErrorState error={recent.error} onRetry={() => recent.refetch()} />
+              : recent.isLoading ? <Skeleton className="h-28 w-full" />
+              : recent.data?.length === 0 ? <Empty title="No public reports yet" />
+              : (
+                <ol className="divide-y divide-white/[0.06]">
+                  {(recent.data ?? []).map((i) => (
+                    <li key={i.reference} className="py-3 first:pt-0 last:pb-0">
+                      <Link to={`/status?ref=${encodeURIComponent(i.reference)}`} className="block rounded-lg transition hover:bg-white/[0.03] focus-visible:px-2">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="font-mono text-xs text-lilac-200">{i.reference}</span>
+                          <Badge tone={TONE[i.status] ?? "neutral"}>{humanize(i.category)}</Badge>
+                          <span className="text-xs text-fog-500">{timeAgo(i.reported_at)}</span>
+                        </div>
+                        <p className="mt-1 text-xs text-fog-400">{i.location}</p>
+                        <p className="mt-0.5 text-xs text-fog-500">{i.status_label}</p>
+                      </Link>
+                    </li>
+                  ))}
+                </ol>
+              )}
+            <p className="mt-3 text-[11px] leading-relaxed text-fog-500">Public summaries are deliberately coarse. Police and other sensitive reports do not expose allegations or exact locations.</p>
+          </Panel>
           <Panel title="Confirmed incidents">
             {incidents.isError ? <ErrorState error={incidents.error} onRetry={() => incidents.refetch()} />
               : !incidents.data ? <Skeleton className="h-24 w-full" />

@@ -195,6 +195,7 @@ export function clock(iso: string) {
 export const AGENT_LABEL: Record<string, string> = {
   sentinel: "Sentinel",
   mobility: "Mobility",
+  traffic: "AnalyseTraffic",
   grid: "Grid / Utility",
   coordinator: "Coordinator",
   validator: "Validator",

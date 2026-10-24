@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from app.agents import grid, mobility, sentinel
+from app.agents import grid, mobility, sentinel, traffic
 from app.agents.evidence import assess_evidence, relevant_sensors
 from app.agents.geo_context import incident_geo
 from app.orchestration.revision import RevisionFailure, RevisionOutcome, diff_actions, make_action, resequence, revise
@@ -105,6 +105,47 @@ def test_sentinel_rules_use_reporter_category_and_map_location():
     assert a.category == "fire" and a.urgency == "critical"
     assert a.location_id == geo.segment_id and a.location_name == geo.segment_name
     assert any("unverified" in i for i in a.inferences)
+
+
+def test_resource_recommendations_match_reported_hazards_without_over_dispatching():
+    snap = baseline_snapshot()
+    sc = SCENARIOS["flood_conflict"]
+    geo = incident_geo(snap, sc.lat, sc.lon, "fire", ["people_trapped"])
+    fire = sentinel.rule_based_triage("A building is on fire and people are trapped upstairs.", "fire",
+                                     ["people_trapped"], geo)
+    types = {r.responder_type for r in fire.responder_recommendations}
+    assert types == {"fire_rescue", "ambulance"}
+    assert fire.medical_need == "indicated"
+    assert any("unverified" in r.rationale.lower() for r in fire.responder_recommendations)
+
+    police_geo = incident_geo(snap, sc.lat, sc.lon, "homicide", [])
+    police = sentinel.rule_based_triage("A possible homicide has been reported; the allegation is unverified.", "homicide", [], police_geo)
+    assert {r.responder_type for r in police.responder_recommendations} == {"police"}
+    assert police.responder_recommendations[0].status == "verification_required"
+    assert police.medical_need == "not_indicated"
+
+
+def test_analyse_traffic_is_invoked_with_explicit_degraded_data_mode():
+    snap, geo, ev, a, ind = context("flood_conflict")
+    mp = mobility.propose(snap, a, ev, geo, ind)
+    tp = traffic.analyse(snap, a, ev, geo, mp)
+    assert tp.data_source == "estimated"
+    assert tp.live_traffic == "unavailable"
+    assert tp.route_assessments
+    assert any("live traffic" in text.lower() for text in tp.uncertainty)
+
+
+def test_injury_collision_ranks_reachable_hospitals_without_claiming_capacity():
+    snap = baseline_snapshot()
+    sc = SCENARIOS["flood_conflict"]
+    geo = incident_geo(snap, sc.lat, sc.lon, "accident", ["multiple_injured"])
+    ev = assess_evidence(snap, geo, "accident", [], NOW, 30)
+    a = sentinel.rule_based_triage("Several people are injured after a road collision.", "accident",
+                                  ["multiple_injured"], geo)
+    mp = mobility.propose(snap, a, ev, geo, ["multiple_injured"])
+    assert a.medical_need == "indicated" and mp.facility_recommendations
+    assert all(x["capability_status"] == "unverified" and x["availability_status"] == "unknown"
+               for x in mp.facility_recommendations)
 
 
 class _Hallucinating:

@@ -11,6 +11,7 @@ import type {
   Overlay,
   Plan,
   PublicIncident,
+  PublicRecentIncident,
   PublicReportInput,
   PublicReportReceipt,
   PublicReportStatus,
@@ -85,6 +86,7 @@ export const publicApi = {
   submitReport: (data: PublicReportInput) => post<PublicReportReceipt>("/public/reports", data),
   reportStatus: (reference: string) => request<PublicReportStatus>(`/public/reports/${encodeURIComponent(reference)}`),
   incidents: () => request<PublicIncident[]>("/public/incidents"),
+  recentIncidents: () => request<PublicRecentIncident[]>("/public/recent-incidents"),
   closures: () => request<Closure[]>("/public/closures"),
   segments: (s: number, w: number, n: number, e: number) =>
     request<{ segments: RoadSegment[]; truncated: boolean }>(
