@@ -1,0 +1,41 @@
+import { NavLink, Outlet, Link } from "react-router";
+import { Phone } from "@phosphor-icons/react";
+import { BrandMark } from "../landing/LandingPage";
+import { cx } from "../../components/ui";
+
+export default function PublicShell() {
+  const nav = ({ isActive }: { isActive: boolean }) =>
+    cx("inline-flex h-9 items-center rounded-full px-3.5 text-[13px] transition",
+      isActive ? "bg-white/[0.09] text-fog-100" : "text-fog-400 hover:bg-white/[0.05] hover:text-fog-100");
+  return (
+    <div className="min-h-[100dvh] bg-ink-950 text-fog-100">
+      <a href="#main" className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded-lg focus:bg-ink-800 focus:px-3 focus:py-2">
+        Skip to content
+      </a>
+      <header className="sticky top-0 z-[1000] border-b border-white/[0.06] bg-ink-950/85 backdrop-blur-xl">
+        <div className="mx-auto flex h-16 max-w-[1280px] items-center gap-3 px-4 sm:px-6">
+          <Link to="/" aria-label="GridPulse home" className="shrink-0"><BrandMark /></Link>
+          <nav aria-label="Public" className="ml-2 flex items-center gap-1 overflow-x-auto sm:ml-6">
+            <NavLink to="/report" className={nav}>Report a hazard</NavLink>
+            <NavLink to="/status" className={nav}>Track &amp; map</NavLink>
+          </nav>
+          <Link to="/operator/login" className="ml-auto hidden text-[13px] text-fog-400 hover:text-fog-100 sm:inline">
+            Operator sign-in
+          </Link>
+        </div>
+      </header>
+      <div className="border-b border-warn/20 bg-warn/[0.06]">
+        <p className="mx-auto flex max-w-[1280px] items-center gap-2 px-4 py-2 text-xs text-warn sm:px-6">
+          <Phone size={14} weight="fill" className="shrink-0" />
+          GridPulse is a hackathon simulation and does not dispatch real services. If anyone is in danger, call 112.
+        </p>
+      </div>
+      <main id="main" className="mx-auto max-w-[1280px] px-4 pb-20 pt-8 sm:px-6">
+        <Outlet />
+      </main>
+      <footer className="border-t border-white/[0.06] py-6 text-center text-xs text-fog-500">
+        Map data © OpenStreetMap contributors (ODbL) · Tiles © CARTO
+      </footer>
+    </div>
+  );
+}

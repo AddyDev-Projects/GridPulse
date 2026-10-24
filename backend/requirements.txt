@@ -1,0 +1,18 @@
+# GridPulse backend: direct dependencies, pinned to the versions the test suite passed with.
+# Install:  pip install -r requirements.txt
+# For the full transitive set exactly as tested, use requirements.lock instead.
+
+fastapi==0.162.0
+uvicorn[standard]==0.54.0
+pydantic==2.14.1
+pydantic-settings==2.16.1
+SQLAlchemy==2.1.6
+alembic==1.20.1
+psycopg[binary]==3.3.6
+networkx==3.7
+httpx==0.28.1
+anthropic==2.3.0
+argon2-cffi==25.1.0
+
+# Tests
+pytest==9.1.1

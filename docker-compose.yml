@@ -1,0 +1,29 @@
+# Local PostgreSQL 16 for GridPulse (the app itself runs with uvicorn + Vite, see README).
+#
+# The container's superuser is "postgres" with the password from GRIDPULSE_PG_ADMIN_PASSWORD in .env
+# (Compose reads .env from this directory). The GridPulse role and databases are then created by
+# backend/scripts/db_setup.py, exactly as for a native install:
+#   docker compose up -d postgres
+#   scripts/setup.ps1   (Windows)   or   ./scripts/setup.sh   (macOS / Linux)
+#
+# Data lives in the named volume "gridpulse-pg". Nothing here ever drops it; remove it yourself
+# only if you really want a clean database (docker compose down -v).
+services:
+  postgres:
+    image: postgres:16.4
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${GRIDPULSE_PG_ADMIN_PASSWORD:?Set GRIDPULSE_PG_ADMIN_PASSWORD in .env}
+      POSTGRES_DB: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - gridpulse-pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  gridpulse-pg:
