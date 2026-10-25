@@ -150,7 +150,7 @@ function ResponderPanel({ recommendations }: { recommendations: ResponderRecomme
   return (
     <Panel title="Responder recommendations">
       {recommendations.length === 0 ? <Empty title="No specific responder type inferred" /> : (
-        <ul className="grid gap-3">
+        <ul className="stagger grid gap-3">
           {recommendations.map((r) => (
             <li key={r.responder_type} className="rounded-xl border border-white/[0.07] bg-white/[0.02] p-3.5">
               <div className="flex flex-wrap items-center gap-2">
@@ -173,7 +173,7 @@ function FacilityPanel({ recommendations }: { recommendations: FacilityRecommend
   return (
     <Panel title="Facility candidates">
       {recommendations.length === 0 ? <Empty title="No reachable facility estimate" /> : (
-        <ul className="grid gap-3">
+        <ul className="stagger grid gap-3">
           {recommendations.map((f) => (
             <li key={f.facility_id} className="rounded-xl border border-white/[0.07] bg-white/[0.02] p-3.5">
               <div className="flex flex-wrap items-center gap-2">
@@ -321,7 +321,7 @@ export default function OverviewTab() {
           {detail.proposals.length === 0 ? (
             <Empty title={wf.running ? "Agents are preparing proposals" : "No proposals"} />
           ) : (
-            <ul className="grid gap-3">{detail.proposals.map((p) => <ProposalCard key={p.id} p={p} />)}</ul>
+            <ul className="stagger grid gap-3">{detail.proposals.map((p) => <ProposalCard key={p.id} p={p} />)}</ul>
           )}
         </Panel>
         {services.length > 0 ? <ServicesPanel services={services} plan={wf.plans[wf.plans.length - 1]} />

@@ -24,7 +24,7 @@ export default function LoginPage() {
 
   return (
     <div className="grid min-h-[100dvh] place-items-center bg-ink-950 bg-[radial-gradient(70%_50%_at_50%_0%,rgba(180,162,251,0.1),transparent)] px-4">
-      <div className="w-full max-w-sm">
+      <div className="page-enter w-full max-w-sm">
         <Link to="/" className="mb-8 inline-block" aria-label="GridPulse home"><BrandMark /></Link>
         <form
           className="panel grid gap-4 p-6"

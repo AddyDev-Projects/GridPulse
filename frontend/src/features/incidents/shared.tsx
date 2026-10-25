@@ -34,7 +34,7 @@ export function WorkflowStepper({ wf }: { wf: Workflow }) {
             <span
               aria-current={isCurrent ? "step" : undefined}
               className={cx(
-                "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs",
+                "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs transition-colors duration-500",
                 isCurrent && !terminalBad && "bg-lilac-300/12 text-lilac-200 ring-1 ring-inset ring-lilac-300/30",
                 isCurrent && wf.running && "live-ring",
                 !isCurrent && done && "text-fog-300",
@@ -45,7 +45,13 @@ export function WorkflowStepper({ wf }: { wf: Workflow }) {
               {done ? <CheckCircle size={13} weight="fill" className={s.status === "REVISION_REQUIRED" ? "text-warn" : "text-ok"} /> : <Circle size={13} />}
               {s.label}
             </span>
-            {i < STAGES.length - 1 && <span className="h-px w-3 bg-white/10" aria-hidden />}
+            {/* The connector fills in when the next stage is reached, so progress visibly travels along. */}
+            {i < STAGES.length - 1 && (
+              <span className="relative h-px w-3 overflow-hidden bg-white/10" aria-hidden>
+                <span className={cx("absolute inset-0 origin-left bg-lilac-300/60 transition-[scale] duration-700 ease-out-expo",
+                  visited.has(STAGES[i + 1].status as never) ? "scale-x-100" : "scale-x-0")} />
+              </span>
+            )}
           </li>
         );
       })}

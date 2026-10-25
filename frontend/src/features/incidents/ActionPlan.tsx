@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { CaretDown, CheckCircle, Info, Question, Warning, XCircle } from "@phosphor-icons/react";
 import { AGENT_LABEL, Badge, StatusBadge, cx, humanize } from "../../components/ui";
+import { Collapse } from "../../components/motion";
 import { COLORS } from "../map/mapTheme";
 import { FindingCard, describeAction, km, mins } from "./shared";
 import type { Department, Finding, Incident, Plan, PlanAction, RouteLeg, ServiceRequirement } from "../../types/api";
@@ -67,7 +68,7 @@ export function DepartmentList({ departments }: { departments: Department[] }) {
           No department is justified by the report yet. The plan asks for verification before anyone is sent.
         </p>
       )}
-      <ul className="grid gap-2.5">
+      <ul className="stagger grid gap-2.5">
         {involved.map((d) => (
           <li key={d.service} className="rounded-xl border border-white/[0.08] bg-white/[0.02] p-3.5">
             <div className="flex flex-wrap items-center gap-2">
@@ -89,14 +90,14 @@ export function DepartmentList({ departments }: { departments: Department[] }) {
         <div className="mt-2">
           <button type="button" onClick={() => setShowOthers((o) => !o)} aria-expanded={showOthers}
             className="inline-flex items-center gap-1 text-xs text-fog-400 hover:text-fog-100 focus-visible:outline-2 focus-visible:outline-lilac-300">
-            <CaretDown size={12} className={cx("transition", showOthers && "rotate-180")} />
+            <CaretDown size={12} className={cx("transition duration-300 ease-out-expo", showOthers && "rotate-180")} />
             Not involved: {others.map((d) => d.label).join(", ")}
           </button>
-          {showOthers && (
-            <ul className="mt-1.5 grid gap-1 text-xs text-fog-500">
+          <Collapse open={showOthers}>
+            <ul className="grid gap-1 pt-1.5 text-xs text-fog-500">
               {others.map((d) => <li key={d.service}><span className="text-fog-300">{d.label}:</span> {d.rationale?.trim() || NO_REASON}</li>)}
             </ul>
-          )}
+          </Collapse>
         </div>
       )}
     </section>
@@ -124,7 +125,7 @@ function ActionItem({ a, findings }: { a: PlanAction; findings: Finding[] }) {
   return (
     <li className={cx("rounded-xl border", worst === "blocking" ? "border-bad/40 bg-bad/[0.04]" : "border-white/[0.07] bg-white/[0.02]")}>
       <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open} aria-controls={id}
-        className="flex w-full flex-wrap items-center gap-2 p-3.5 text-left focus-visible:outline-2 focus-visible:outline-lilac-300">
+        className="flex w-full flex-wrap items-center gap-2 rounded-xl p-3.5 text-left hover:bg-white/[0.025] active:scale-[0.995] focus-visible:outline-2 focus-visible:outline-lilac-300">
         <span className="font-mono text-xs text-fog-500">#{a.seq}</span>
         <span className="text-sm font-medium text-fog-100">{a.label}</span>
         <span className="inline-flex items-center gap-1.5 rounded-full bg-white/[0.05] px-2 py-0.5 text-[11px] text-fog-300 ring-1 ring-inset ring-white/10">
@@ -133,11 +134,11 @@ function ActionItem({ a, findings }: { a: PlanAction; findings: Finding[] }) {
         </span>
         <Badge tone={a.impact === "high" ? "bad" : a.impact === "medium" ? "warn" : "neutral"}>{a.impact} impact</Badge>
         {worst && <Badge tone={worst === "blocking" ? "bad" : "warn"}>{worst === "blocking" ? "blocked" : "warning"}</Badge>}
-        <CaretDown size={14} className={cx("ml-auto text-fog-500 transition", open && "rotate-180")} />
+        <CaretDown size={14} className={cx("ml-auto text-fog-500 transition duration-300 ease-out-expo", open && "rotate-180")} />
         <span className="basis-full text-[13px] text-fog-300">{describeAction(a, a.target_name)}</span>
       </button>
-      {open && (
-        <div id={id} className="grid gap-2 border-t border-white/[0.06] px-3.5 py-3 text-xs text-fog-400">
+      <Collapse open={open} id={id}>
+        <div className="grid gap-2 border-t border-white/[0.06] px-3.5 py-3 text-xs text-fog-400">
           {isRoute ? (
             <dl className="grid grid-cols-1 gap-x-4 gap-y-1 sm:grid-cols-2">
               <div><dt className="text-fog-500">From</dt><dd className="text-fog-200">{String(p.origin_label ?? p.origin)}</dd></div>
@@ -154,7 +155,7 @@ function ActionItem({ a, findings }: { a: PlanAction; findings: Finding[] }) {
           <p><span className="text-fog-500">Proposed by:</span> {AGENT_LABEL[a.proposed_by] ?? a.proposed_by}</p>
           {findings.length > 0 && <ul className="grid gap-2">{findings.map((f) => <FindingCard key={f.id} f={f} />)}</ul>}
         </div>
-      )}
+      </Collapse>
     </li>
   );
 }
@@ -164,7 +165,7 @@ function FindingGroup({ title, tone, findings, icon }: { title: string; tone: st
   return (
     <div>
       <h4 className={cx("mb-1.5 flex items-center gap-1.5 text-xs font-medium", tone)}>{icon} {title} ({findings.length})</h4>
-      <ul className="grid gap-2">{findings.map((f) => <FindingCard key={f.id} f={f} />)}</ul>
+      <ul className="stagger grid gap-2">{findings.map((f) => <FindingCard key={f.id} f={f} />)}</ul>
     </div>
   );
 }
@@ -200,7 +201,7 @@ export function ActionPlan({ plan, incident, departments, unknowns = [] }: {
       <section aria-label="Planned actions">
         <h3 className="mb-2 text-sm font-medium text-fog-100">Actions, in order</h3>
         {plan.actions.length === 0 ? <p className="text-sm text-fog-500">This plan has no actions.</p> : (
-          <ul className="grid gap-2">{plan.actions.map((a) => <ActionItem key={`${plan.id}-${a.seq}`} a={a} findings={bySeq(a.seq)} />)}</ul>
+          <ul className="stagger grid gap-2">{plan.actions.map((a) => <ActionItem key={`${plan.id}-${a.seq}`} a={a} findings={bySeq(a.seq)} />)}</ul>
         )}
       </section>
 

@@ -29,6 +29,7 @@ import {
 } from "../../components/ui";
 import { COLORS, CityMap, MapLegend, SERVICE_LEGEND, routeTone } from "../map/CityMap";
 import { SourceBadge } from "../incidents/shared";
+import { AnimatedNumber } from "../../components/motion";
 
 function ReportQueue() {
   const incidents = useIncidents("current");
@@ -45,11 +46,11 @@ function ReportQueue() {
   const order = (s: string) => (s === "REPORTED" ? 0 : s === "AWAITING_APPROVAL" || s === "STALE" ? 1 : 2);
   const rows = [...incidents.data].sort((a, b) => order(a.status) - order(b.status));
   return (
-    <ul className="divide-y divide-white/[0.06]">
+    <ul className="stagger divide-y divide-white/[0.06]">
       {rows.map((i) => (
         <li key={i.id}>
           <button type="button" onClick={() => navigate(`/ops/incidents/${i.id}`)}
-            className="group flex w-full items-center gap-3 rounded-lg px-2 py-3.5 sm:gap-4 text-left transition hover:bg-white/[0.03]">
+            className="group flex w-full items-center gap-3 rounded-lg px-2 py-3.5 text-left transition hover:bg-white/[0.03] active:scale-[0.99] sm:gap-4">
             <Siren size={20} className={i.status === "REPORTED" ? "text-orchid-300" : "text-fog-500"} />
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2 text-xs">
@@ -66,7 +67,7 @@ function ReportQueue() {
               </p>
             </div>
             <span className="hidden sm:inline-flex"><StatusBadge status={i.status} /></span>
-            <CaretRight size={16} className="text-fog-500 transition group-hover:translate-x-0.5" />
+            <CaretRight size={16} className="text-fog-500 transition duration-300 ease-out-expo group-hover:translate-x-1 group-hover:text-fog-300" />
           </button>
         </li>
       ))}
@@ -92,9 +93,9 @@ function ScenarioControls() {
         create a labelled simulated report. Loading one lifts current simulated closures and makes earlier plans stale.
       </p>
       {!isAdmin && <p className="rounded-lg bg-white/[0.03] px-3 py-2 text-xs text-fog-400">Loading scenarios requires the admin role.</p>}
-      <ul className="grid gap-2">
+      <ul className="stagger grid gap-2">
         {scenarios.data.map((s) => (
-          <li key={s.key} className={cx("rounded-xl border p-3", active === s.key ? "border-lilac-300/40 bg-lilac-300/[0.05]" : "border-white/[0.07]")}>
+          <li key={s.key} className={cx("rounded-xl border p-3 transition-colors duration-500", active === s.key ? "border-lilac-300/40 bg-lilac-300/[0.05]" : "border-white/[0.07] hover:border-white/[0.12]")}>
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <p className="text-sm text-fog-100"><span className="font-mono text-xs text-fog-500">{s.code}</span> {s.title}</p>
@@ -161,7 +162,7 @@ function RecentEvents() {
   if (!audit.data) return <LoadingBlock rows={3} />;
   if (audit.data.length === 0) return <Empty title="No events yet" />;
   return (
-    <ol className="grid gap-3">
+    <ol className="stagger grid gap-3">
       {audit.data.map((e) => (
         <li key={e.id} className="flex gap-3 text-sm">
           <SeverityIcon severity={e.severity} size={16} />
@@ -186,12 +187,12 @@ export default function DashboardPage() {
           <p className="mt-1 text-sm text-fog-400">Mangaluru, Karnataka. Real OpenStreetMap roads; simulated sensors, utilities and actions.</p>
         </div>
         {s && (
-          <dl className="flex gap-6 text-sm">
+          <dl className="stagger flex gap-6 text-sm">
             {([["New reports", s.new_reports, s.new_reports > 0], ["Awaiting approval", s.pending_approvals, s.pending_approvals > 0],
               ["Closed segments", s.closures, false], ["Active routes", s.active_routes.length, false]] as const).map(([k, v, hot]) => (
               <div key={k}>
                 <dt className="text-xs text-fog-500">{k}</dt>
-                <dd className={cx("font-display text-2xl", hot ? "text-lilac-200" : "text-fog-300")}>{v}</dd>
+                <dd className={cx("font-display text-2xl transition-colors duration-500", hot ? "text-lilac-200" : "text-fog-300")}><AnimatedNumber value={v} /></dd>
               </div>
             ))}
           </dl>

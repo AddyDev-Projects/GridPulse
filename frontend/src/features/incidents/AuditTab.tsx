@@ -4,6 +4,7 @@ import { useIncidentContext } from "./IncidentLayout";
 import { useIncidentAudit } from "../../hooks/queries";
 import { Empty, ErrorState, LoadingBlock, Panel, SeverityIcon, clock, cx, humanize } from "../../components/ui";
 import type { AuditEvent } from "../../types/api";
+import { Collapse } from "../../components/motion";
 
 /** Recorded details as readable values; nested structures stay compact rather than a raw JSON dump. */
 function DetailValue({ v }: { v: unknown }) {
@@ -32,10 +33,10 @@ function EventRow({ e }: { e: AuditEvent }) {
         <>
           <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open} aria-controls={`audit-${e.id}`}
             className="mt-1 inline-flex items-center gap-1 text-xs text-fog-500 hover:text-fog-300">
-            <CaretDown size={12} className={cx("transition", open && "rotate-180")} /> {open ? "Hide" : "Show"} recorded details
+            <CaretDown size={12} className={cx("transition duration-300 ease-out-expo", open && "rotate-180")} /> {open ? "Hide" : "Show"} recorded details
           </button>
-          {open && (
-            <dl id={`audit-${e.id}`} className="scrollbar-thin mt-2 grid max-h-72 gap-1.5 overflow-auto rounded-xl bg-ink-950 p-3 text-[12px] ring-1 ring-white/[0.06]">
+          <Collapse open={open} id={`audit-${e.id}`}>
+            <dl className="scrollbar-thin mt-2 grid max-h-72 gap-1.5 overflow-auto rounded-xl bg-ink-950 p-3 text-[12px] ring-1 ring-white/[0.06]">
               {Object.entries(e.details).map(([k, v]) => (
                 <div key={k} className="grid gap-0.5 sm:grid-cols-[180px_minmax(0,1fr)] sm:gap-3">
                   <dt className="text-fog-500">{humanize(k)}</dt>
@@ -43,7 +44,7 @@ function EventRow({ e }: { e: AuditEvent }) {
                 </div>
               ))}
             </dl>
-          )}
+          </Collapse>
         </>
       )}
     </li>
@@ -62,7 +63,7 @@ export default function AuditTab() {
       ) : audit.data.length === 0 ? (
         <Empty title="No events recorded" />
       ) : (
-        <ol className="relative grid gap-6 before:absolute before:bottom-2 before:left-3 before:top-2 before:w-px before:bg-white/[0.07]">
+        <ol className="stagger relative grid gap-6 before:absolute before:bottom-2 before:left-3 before:top-2 before:w-px before:bg-white/[0.07]">
           {audit.data.map((e) => <EventRow key={e.id} e={e} />)}
         </ol>
       )}

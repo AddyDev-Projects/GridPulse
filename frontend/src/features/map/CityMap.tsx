@@ -17,6 +17,7 @@ import type { LatLngBoundsExpression, LatLngExpression } from "leaflet";
 import { publicApi } from "../../services/api";
 import type { City, Closure, LatLng, OverlayNode, Poi, RoadSegment, Zone } from "../../types/api";
 import { cx } from "../../components/ui";
+import { Indicator } from "../../components/motion";
 import { GoogleMapCanvas, resetGoogleMapsLoader, type GoogleMapsFailure } from "./GoogleMap";
 import { ALT_DASH, CASING_WIDTH, COLORS, POI_GLYPH, ROUTE_DASH, ROUTE_WIDTH, poiTitle, type RouteTone } from "./mapTheme";
 
@@ -84,8 +85,14 @@ function FitTo({ points, fallback, skipFirst }: { points: LatLng[] | null | unde
       first.current = false;
       return;
     }
+    // The first fit is instant; later focus changes glide there (Leaflet jumps instead without CSS 3D).
+    const glide = !first.current;
     first.current = false;
-    if (points && points.length > 1) map.fitBounds(points as LatLngBoundsExpression, { padding: [36, 36], maxZoom: 17 });
+    if (glide) {
+      if (points && points.length > 1) map.flyToBounds(points as LatLngBoundsExpression, { padding: [36, 36], maxZoom: 17, duration: 0.8 });
+      else if (points && points.length === 1) map.flyTo(points[0] as LatLngExpression, 16, { duration: 0.8 });
+      else map.flyToBounds(fallback, { duration: 0.8 });
+    } else if (points && points.length > 1) map.fitBounds(points as LatLngBoundsExpression, { padding: [36, 36], maxZoom: 17 });
     else if (points && points.length === 1) map.setView(points[0] as LatLngExpression, 16);
     else map.fitBounds(fallback);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -226,12 +233,12 @@ function LeafletMap({
         ))}
         {routes.filter((r) => !r.alternative).map((r) => (
           <Polyline key={`${r.id}-casing`} positions={r.geometry} interactive={false} className="gp-route-casing"
-            pathOptions={{ color: COLORS.casing, weight: CASING_WIDTH, opacity: 0.85, lineCap: "round", lineJoin: "round" }} />
+            pathOptions={{ color: COLORS.casing, weight: CASING_WIDTH, opacity: 0.85, lineCap: "round", lineJoin: "round", className: "gp-fade-in" }} />
         ))}
         {routes.filter((r) => !r.alternative).map((r) => (
           <Polyline key={r.id} positions={r.geometry}
             pathOptions={{ color: COLORS[r.tone], weight: ROUTE_WIDTH, opacity: 1, dashArray: ROUTE_DASH[r.tone],
-              lineCap: "round", lineJoin: "round" }}>
+              lineCap: "round", lineJoin: "round", className: "gp-fade-in" }}>
             <Tooltip sticky>{r.label}</Tooltip>
           </Polyline>
         ))}
@@ -253,7 +260,7 @@ function LeafletMap({
         {markers.map((m) => (
           <CircleMarker key={m.id} center={[m.lat, m.lon]} radius={m.radius ?? 9}
             eventHandlers={m.onClick ? { click: m.onClick } : undefined}
-            pathOptions={{ color: "#ffffff", fillColor: m.color ?? COLORS.incident, fillOpacity: 0.95, weight: 2.5 }}>
+            pathOptions={{ color: "#ffffff", fillColor: m.color ?? COLORS.incident, fillOpacity: 0.95, weight: 2.5, className: "gp-fade-in" }}>
             <Tooltip>{m.detail ? `${m.label}: ${m.detail}` : m.label}</Tooltip>
           </CircleMarker>
         ))}
@@ -381,11 +388,12 @@ export function CityMap(props: CityMapProps) {
           </button>
         )}
         {provider === "osm" && (
-          <div role="group" aria-label="Map view" className="inline-flex rounded-full bg-ink-950/85 p-0.5 ring-1 ring-inset ring-white/10">
+          <div role="group" aria-label="Map view" className="relative isolate inline-flex rounded-full bg-ink-950/85 p-0.5 ring-1 ring-inset ring-white/10">
+            <Indicator className="gp-indicator-accent" />
             {(["2d", "3d"] as const).map((d) => (
               <button key={d} type="button" aria-pressed={dims === d} onClick={() => switchDims(d)}
                 className={cx("h-6 rounded-full px-2.5 text-[11px] uppercase focus-visible:outline-2 focus-visible:outline-lilac-300",
-                  dims === d ? "bg-lilac-300/20 text-lilac-100" : "text-fog-400 hover:text-fog-100")}>
+                  dims === d ? "text-lilac-100" : "text-fog-400 hover:text-fog-100")}>
                 {d}
               </button>
             ))}
@@ -393,7 +401,7 @@ export function CityMap(props: CityMapProps) {
         )}
       </div>
       {googleFailure && noticeOpen && (
-        <div role="status" className="absolute bottom-8 left-2 right-2 z-[500] mx-auto flex max-w-xl items-start gap-2 rounded-lg bg-ink-950/95 p-2.5 text-[11.5px] text-fog-200 ring-1 ring-inset ring-warn/40 sm:left-1/2 sm:right-auto sm:-translate-x-1/2">
+        <div role="status" className="pop-in absolute bottom-8 left-2 right-2 z-[500] mx-auto flex max-w-xl items-start gap-2 rounded-lg bg-ink-950/95 p-2.5 text-[11.5px] text-fog-200 ring-1 ring-inset ring-warn/40 sm:left-1/2 sm:right-auto sm:-translate-x-1/2">
           <span className="min-w-0 flex-1">
             <span className="text-warn">Google Maps unavailable; showing OpenStreetMap.</span> {googleFailure.reason}
             {googleFailure.code && <span className="ml-1 font-mono text-fog-500">({googleFailure.code})</span>}
@@ -405,7 +413,7 @@ export function CityMap(props: CityMapProps) {
         </div>
       )}
       {error3d && (
-        <p role="status" className="absolute left-1/2 top-12 z-[500] -translate-x-1/2 rounded-md bg-ink-950/90 px-2.5 py-1 text-[11px] text-warn ring-1 ring-inset ring-warn/30">
+        <p role="status" className="pop-in absolute left-1/2 top-12 z-[500] -translate-x-1/2 rounded-md bg-ink-950/90 px-2.5 py-1 text-[11px] text-warn ring-1 ring-inset ring-warn/30">
           3D view unavailable ({error3d}); showing 2D.
         </p>
       )}

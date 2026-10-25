@@ -105,8 +105,8 @@ const GEO_TEXT: Record<GeoStatus, string> = {
 function Receipt({ r, onAnother }: { r: PublicReportReceipt; onAnother: () => void }) {
   const [copied, setCopied] = useState(false);
   return (
-    <Panel className="mx-auto max-w-xl text-center">
-      <CheckCircle size={44} weight="fill" className="mx-auto text-ok" />
+    <Panel className="pop-in mx-auto max-w-xl text-center">
+      <CheckCircle size={44} weight="fill" className="pop-in mx-auto text-ok [animation-delay:120ms]" />
       <h1 className="mt-4 font-display text-2xl font-light text-fog-100">Report received</h1>
       <p className="mt-2 text-sm text-fog-400">Keep this reference to check what happens next. No account or contact details are needed.</p>
       <div className="mt-6 inline-flex items-center gap-3 rounded-2xl bg-white/[0.04] px-5 py-3 ring-1 ring-white/10">

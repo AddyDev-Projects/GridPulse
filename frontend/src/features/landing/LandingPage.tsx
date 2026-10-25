@@ -89,7 +89,7 @@ function LandingNav() {
         </div>
       </nav>
       {open && (
-        <div id="mobile-menu" className="glass absolute inset-x-4 top-[72px] z-30 rounded-2xl p-2 lg:hidden">
+        <div id="mobile-menu" className="pop-in glass absolute inset-x-4 top-[72px] z-30 rounded-2xl p-2 lg:hidden">
           {NAV.map((n) =>
             n.to ? (
               <Link key={n.label} to={n.to} className="block rounded-xl px-4 py-3 text-sm text-fog-100 hover:bg-white/5">

@@ -5,6 +5,7 @@ import { BrandMark } from "../features/landing/LandingPage";
 import { useLogout, useMe, useSimState } from "../hooks/queries";
 import { ApiError } from "../services/api";
 import { Badge, LoadingBlock, cx } from "../components/ui";
+import { Indicator } from "../components/motion";
 
 export const UNAUTHENTICATED_EVENT = "gridpulse:unauthenticated";
 
@@ -16,12 +17,13 @@ function Header() {
   const s = state.data;
   const navCls = ({ isActive }: { isActive: boolean }) =>
     cx("inline-flex h-9 items-center gap-2 rounded-full px-3.5 text-[13px] transition",
-      isActive ? "bg-white/[0.09] text-fog-100" : "text-fog-400 hover:bg-white/[0.05] hover:text-fog-100");
+      isActive ? "text-fog-100" : "text-fog-400 hover:bg-white/[0.05] hover:text-fog-100");
   return (
     <header className="sticky top-0 z-[1000] border-b border-white/[0.06] bg-ink-950/85 backdrop-blur-xl">
       <div className="mx-auto flex h-16 max-w-[1440px] items-center gap-2 px-4 sm:gap-3 sm:px-6">
         <Link to="/" aria-label="GridPulse landing page" className="shrink-0"><BrandMark /></Link>
-        <nav aria-label="Console" className="flex items-center gap-1 sm:ml-6">
+        <nav aria-label="Console" className="relative isolate flex items-center gap-1 sm:ml-6">
+          <Indicator />
           <NavLink to="/ops" end className={navCls}><SquaresFour size={16} /> <span className="hidden sm:inline">Operations</span></NavLink>
           <NavLink to="/ops/city" className={navCls}><MapTrifold size={16} /> <span className="hidden sm:inline">City map</span></NavLink>
         </nav>
@@ -80,7 +82,10 @@ export default function AppShell() {
       </a>
       <Header />
       <main id="main" className="mx-auto max-w-[1440px] px-4 pb-20 pt-6 sm:px-6">
-        <Outlet />
+        {/* One entrance per page; switching an incident's tabs animates inside IncidentLayout instead. */}
+        <div key={location.pathname.split("/").slice(0, 4).join("/")} className="page-enter">
+          <Outlet />
+        </div>
       </main>
     </div>
   );

@@ -1,9 +1,10 @@
 import { useState } from "react";
-import { NavLink, Outlet, useOutletContext, useParams, Link } from "react-router";
+import { NavLink, Outlet, useLocation, useOutletContext, useParams, Link } from "react-router";
 import { ArrowLeft, CheckCircle, CircleNotch, FlagCheckered, Play, Prohibit } from "@phosphor-icons/react";
 import { useIncident, useIncidentAction, useResolve, useWorkflow } from "../../hooks/queries";
 import type { IncidentDetail, Workflow } from "../../types/api";
 import { Badge, Button, ErrorState, InlineError, LoadingBlock, StatusBadge, cx, humanize } from "../../components/ui";
+import { Indicator } from "../../components/motion";
 import { SourceBadge, WorkflowStepper } from "./shared";
 
 export interface IncidentContext {
@@ -122,6 +123,7 @@ function ResolveAction({ wf, detail }: IncidentContext) {
 
 export default function IncidentLayout() {
   const { id = "" } = useParams();
+  const location = useLocation();
   const wf = useWorkflow(id);
   const running = Boolean(wf.data?.running);
   const detail = useIncident(id, running);
@@ -133,7 +135,7 @@ export default function IncidentLayout() {
   const latest = w.plans[w.plans.length - 1];
   const tab = ({ isActive }: { isActive: boolean }) =>
     cx("relative inline-flex h-10 items-center gap-2 px-1 text-sm transition",
-      isActive ? "text-fog-100 after:absolute after:inset-x-0 after:-bottom-px after:h-0.5 after:rounded-full after:bg-lilac-300" : "text-fog-400 hover:text-fog-100");
+      isActive ? "text-fog-100" : "text-fog-400 hover:text-fog-100");
 
   return (
     <div className="grid grid-cols-1 gap-6">
@@ -167,7 +169,8 @@ export default function IncidentLayout() {
       <ReviewActions wf={w} detail={detail.data} />
       <ResolveAction wf={w} detail={detail.data} />
 
-      <nav aria-label="Incident sections" className="flex gap-6 overflow-x-auto border-b border-white/[0.07]">
+      <nav aria-label="Incident sections" className="relative isolate flex gap-6 overflow-x-auto border-b border-white/[0.07]">
+        <Indicator variant="underline" />
         <NavLink end to="" className={tab}>Overview</NavLink>
         <NavLink to="plans" className={tab}>
           Plans and validation {w.plans.length > 0 && <span className="text-xs text-fog-500">{w.plans.length} {w.plans.length === 1 ? "version" : "versions"}</span>}
@@ -178,9 +181,9 @@ export default function IncidentLayout() {
         <NavLink to="audit" className={tab}>Audit trail</NavLink>
       </nav>
 
-      {/* Keyed by incident: tab state (selected revision, open confirmations, notes) never carries over
-          from a previously viewed incident. */}
-      <div key={inc.id} className="contents">
+      {/* Keyed by incident and tab: tab state (selected revision, open confirmations, notes) never carries
+          over from a previously viewed incident, and each tab switch gets a short entrance. */}
+      <div key={`${inc.id}:${location.pathname}`} className="tab-enter min-w-0">
         <Outlet context={{ wf: w, detail: detail.data } satisfies IncidentContext} />
       </div>
     </div>

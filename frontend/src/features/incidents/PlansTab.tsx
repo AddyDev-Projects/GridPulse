@@ -8,6 +8,7 @@ import { AGENT_LABEL, Badge, Empty, Panel, Skeleton, StatusBadge, TextLink, cx, 
 import { COLORS, CityMap, MapLegend, SERVICE_LEGEND, routeTone, type MapMarker, type MapRoute } from "../map/CityMap";
 import { SERVICE_COLORS } from "../map/mapTheme";
 import type { Closure, LatLng, Plan, Revision } from "../../types/api";
+import { Indicator } from "../../components/motion";
 
 const routesOf = (p: Plan) => p.actions.filter((a) => a.action_type === "designate_response_route");
 
@@ -30,7 +31,7 @@ function PlanColumn({ plan, title, revision, side }: { plan: Plan; title: string
         </div>
         <div>
           <h3 className="mb-2 text-xs text-fog-500">Proposed actions</h3>
-          <ul className="grid gap-2">
+          <ul className="stagger grid gap-2">
             {plan.actions.map((a) => {
               const key = `${a.action_type}:${a.target_id}`;
               const hl = side === "before" && blockingSeqs.has(a.seq) ? "conflict"
@@ -41,7 +42,7 @@ function PlanColumn({ plan, title, revision, side }: { plan: Plan; title: string
         </div>
         <div>
           <h3 className="mb-2 text-xs text-fog-500">Validator findings</h3>
-          {findings.length === 0 ? <p className="text-sm text-fog-500">No findings.</p> : <ul className="grid gap-2">{findings.map((f) => <FindingCard key={f.id} f={f} />)}</ul>}
+          {findings.length === 0 ? <p className="text-sm text-fog-500">No findings.</p> : <ul className="stagger grid gap-2">{findings.map((f) => <FindingCard key={f.id} f={f} />)}</ul>}
         </div>
       </div>
     </Panel>
@@ -79,7 +80,7 @@ function RevisionCard({ r }: { r: Revision }) {
         <div>
           <h3 className="mb-2 text-xs text-fog-500">Alternatives the agents evaluated</h3>
           {r.alternatives.length === 0 ? <p className="text-sm text-fog-500">Single remediation path for this finding type.</p> : (
-            <ul className="grid gap-2">
+            <ul className="stagger grid gap-2">
               {r.alternatives.map((alt, i) => (
                 <li key={`${alt.strategy}${i}`} className={cx("rounded-xl border p-3.5", alt.selected ? "border-ok/35 bg-ok/[0.04]" : "border-white/[0.07]")}>
                   <div className="flex flex-wrap items-center gap-2">
@@ -202,10 +203,11 @@ export default function PlansTab() {
   return (
     <div className="grid grid-cols-1 gap-6">
       {revisions.length > 1 && (
-        <div role="tablist" aria-label="Revision" className="flex gap-2">
+        <div role="tablist" aria-label="Revision" className="relative isolate flex gap-2 justify-self-start">
+          <Indicator />
           {revisions.map((r, i) => (
             <button key={r.id} role="tab" aria-selected={i === idx} onClick={() => setRevIdx(i)}
-              className={cx("rounded-full px-3 py-1.5 text-xs", i === idx ? "bg-white/10 text-fog-100" : "text-fog-400 hover:text-fog-100")}>
+              className={cx("rounded-full px-3 py-1.5 text-xs", i === idx ? "text-fog-100" : "text-fog-400 hover:text-fog-100")}>
               Revision {r.revision_number}
             </button>
           ))}
