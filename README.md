@@ -216,10 +216,25 @@ The app remains fully usable without Google Maps. To enable the primary provider
 1. In a Google Cloud project, enable **Maps JavaScript API** and configure billing as required by Google Maps Platform.
 2. Create a browser key and restrict it by HTTP referrer (for local development, the `localhost:5173` and
    `127.0.0.1:5173` origins) and by the APIs it may call. Do not put a server credential in the frontend variable.
-3. Set `VITE_GOOGLE_MAPS_API_KEY` in the root `.env`. Optionally set `VITE_GOOGLE_MAPS_TRAFFIC_LAYER=true` to request
-   Google's supported visual traffic layer.
-4. Restart Vite. The map shows a small provider indicator. Missing keys, authorization/billing failures, network errors,
-   and map-load failures fall back to Leaflet + OpenStreetMap without retrying the failed Google request.
+3. Set `VITE_GOOGLE_MAPS_API_KEY` in the **repository-root** `.env` (not `frontend/.env`: `vite.config.ts` reads
+   env files from the root). Optionally set `VITE_GOOGLE_MAPS_TRAFFIC_LAYER=true` to start with Google's visual
+   traffic layer shown. An empty or placeholder value means "not configured" and OpenStreetMap is used.
+4. Restart `npm run dev` (Vite inlines the key at start-up) and reload the page. The map shows a provider badge.
+
+If Google cannot be used, the map falls back to OpenStreetMap and says why, with Google's own error code when Google
+reports one. Google rejects a key only *after* its script has loaded, so the app watches `gm_authFailure`, Google's
+console error codes, and whether any map tile arrives within 15 s. Common codes:
+
+| Code shown | Meaning | Fix (in Google Cloud Console) |
+|---|---|---|
+| `RefererNotAllowedMapError` | This site's address is not in the key's HTTP-referrer list | Add `http://localhost:5173/*` (and any other origin you use) to the key's website restrictions |
+| `ApiNotActivatedMapError` | Maps JavaScript API not enabled | Enable **Maps JavaScript API** for the key's project |
+| `BillingNotEnabledMapError` | No billing account on the project | Attach a billing account |
+| `ApiTargetBlockedMapError` | The key's API restrictions exclude Maps JavaScript API | Add it to the key's allowed APIs |
+| `InvalidKeyMapError` | The key is wrong or was deleted | Copy the key again into `.env` |
+
+A key problem needs the fix above, a dev-server restart and a reload; **Try Google Maps again** appears only for
+network or timeout failures, which a retry can solve.
 
 Google Maps is a visual provider only in GridPulse. AnalyseTraffic continues to label live traffic as unavailable and
 uses the versioned OSM graph plus simulated closure/caution state. It never scrapes Google Maps or treats a basemap as

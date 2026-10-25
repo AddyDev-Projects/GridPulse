@@ -17,7 +17,7 @@ import type { LatLngBoundsExpression, LatLngExpression } from "leaflet";
 import { publicApi } from "../../services/api";
 import type { City, Closure, LatLng, OverlayNode, Poi, RoadSegment, Zone } from "../../types/api";
 import { cx } from "../../components/ui";
-import { GoogleMapCanvas } from "./GoogleMap";
+import { GoogleMapCanvas, resetGoogleMapsLoader, type GoogleMapsFailure } from "./GoogleMap";
 import { ALT_DASH, CASING_WIDTH, COLORS, POI_GLYPH, ROUTE_DASH, ROUTE_WIDTH, poiTitle, type RouteTone } from "./mapTheme";
 
 export { COLORS, SERVICE_LEGEND, routeTone } from "./mapTheme";
@@ -283,7 +283,14 @@ class ThreeDBoundary extends Component<{ onError: (reason: string) => void; chil
   }
 }
 
-const GOOGLE_MAPS_KEY = (import.meta.env.VITE_GOOGLE_MAPS_API_KEY as string | undefined)?.trim();
+// Read from the repository-root .env (vite.config.ts envDir); Vite inlines it at dev-server start or build,
+// so a changed key takes effect only after the dev server restarts (Vite usually does this on a .env change) and a reload.
+const RAW_GOOGLE_KEY = (import.meta.env.VITE_GOOGLE_MAPS_API_KEY as string | undefined)?.trim() ?? "";
+const PLACEHOLDER_KEY = /^(change[_-]?me|your[_-]|replace|<|x+$)/i;
+const GOOGLE_MAPS_KEY = RAW_GOOGLE_KEY && !PLACEHOLDER_KEY.test(RAW_GOOGLE_KEY) ? RAW_GOOGLE_KEY : "";
+const GOOGLE_NOT_CONFIGURED = RAW_GOOGLE_KEY
+  ? "VITE_GOOGLE_MAPS_API_KEY in the repository-root .env looks like a placeholder, so Google Maps is not used."
+  : "Google Maps is not configured (VITE_GOOGLE_MAPS_API_KEY in the repository-root .env is empty), so OpenStreetMap is used.";
 // Existing configuration decides the default; the operator's choice then holds for this browser session.
 const GOOGLE_TRAFFIC_DEFAULT = import.meta.env.VITE_GOOGLE_MAPS_TRAFFIC_LAYER === "true";
 const TRAFFIC_PREF = "gridpulse:google-traffic";
@@ -311,7 +318,8 @@ const toggleCls = (on: boolean) =>
 
 export function CityMap(props: CityMapProps) {
   const [provider, setProvider] = useState<"google" | "osm">(GOOGLE_MAPS_KEY ? "google" : "osm");
-  const [googleError, setGoogleError] = useState<string | null>(null);
+  const [googleFailure, setGoogleFailure] = useState<GoogleMapsFailure | null>(null);
+  const [noticeOpen, setNoticeOpen] = useState(false);
   const [trafficAvailable, setTrafficAvailable] = useState(false);
   const [showTraffic, setShowTraffic] = useState(readTrafficPref);
   const [dims, setDims] = useState<"2d" | "3d">("2d");
@@ -319,11 +327,19 @@ export function CityMap(props: CityMapProps) {
   const view = useRef<MapView | null>(null);
   const [restore, setRestore] = useState<MapView | null>(null);
 
-  const failGoogle = useCallback((reason: string) => {
-    setGoogleError(reason);
+  const failGoogle = useCallback((failure: GoogleMapsFailure) => {
+    setGoogleFailure(failure);
+    setNoticeOpen(true);
     setTrafficAvailable(false);
     setProvider("osm");
   }, []);
+  const retryGoogle = () => {
+    resetGoogleMapsLoader();
+    setGoogleFailure(null);
+    setNoticeOpen(false);
+    setDims("2d");
+    setProvider("google");
+  };
   const rememberView = useCallback((v: MapView) => { view.current = v; }, []);
   const fail3d = useCallback((reason: string) => {
     setError3d(reason);
@@ -345,7 +361,7 @@ export function CityMap(props: CityMapProps) {
 
   const providerLabel = provider === "google"
     ? "Google Maps"
-    : googleError
+    : googleFailure
       ? "OpenStreetMap · Google Maps unavailable"
       : dims === "3d" ? "OpenStreetMap · 3D buildings (OpenFreeMap)" : "OpenStreetMap · fallback provider";
   return (
@@ -355,7 +371,7 @@ export function CityMap(props: CityMapProps) {
       <div className={cx("absolute top-2 z-[500] flex flex-wrap items-center gap-1.5",
         provider === "google" ? "left-2 justify-start" : "right-2 justify-end")}>
         <span className="rounded-full bg-ink-950/85 px-2.5 py-1 text-[10px] text-fog-300 ring-1 ring-inset ring-white/10"
-          title={googleError ?? undefined}>
+          title={googleFailure?.reason ?? (provider === "osm" && !GOOGLE_MAPS_KEY ? GOOGLE_NOT_CONFIGURED : undefined)}>
           {providerLabel}
         </span>
         {provider === "google" && trafficAvailable && (
@@ -376,6 +392,18 @@ export function CityMap(props: CityMapProps) {
           </div>
         )}
       </div>
+      {googleFailure && noticeOpen && (
+        <div role="status" className="absolute bottom-8 left-2 right-2 z-[500] mx-auto flex max-w-xl items-start gap-2 rounded-lg bg-ink-950/95 p-2.5 text-[11.5px] text-fog-200 ring-1 ring-inset ring-warn/40 sm:left-1/2 sm:right-auto sm:-translate-x-1/2">
+          <span className="min-w-0 flex-1">
+            <span className="text-warn">Google Maps unavailable; showing OpenStreetMap.</span> {googleFailure.reason}
+            {googleFailure.code && <span className="ml-1 font-mono text-fog-500">({googleFailure.code})</span>}
+          </span>
+          {googleFailure.retryable && (
+            <button type="button" onClick={retryGoogle} className={toggleCls(false)}>Try Google Maps again</button>
+          )}
+          <button type="button" onClick={() => setNoticeOpen(false)} aria-label="Dismiss" className="px-1 text-fog-400 hover:text-fog-100">×</button>
+        </div>
+      )}
       {error3d && (
         <p role="status" className="absolute left-1/2 top-12 z-[500] -translate-x-1/2 rounded-md bg-ink-950/90 px-2.5 py-1 text-[11px] text-warn ring-1 ring-inset ring-warn/30">
           3D view unavailable ({error3d}); showing 2D.

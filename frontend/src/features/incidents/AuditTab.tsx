@@ -5,6 +5,15 @@ import { useIncidentAudit } from "../../hooks/queries";
 import { Empty, ErrorState, LoadingBlock, Panel, SeverityIcon, clock, cx, humanize } from "../../components/ui";
 import type { AuditEvent } from "../../types/api";
 
+/** Recorded details as readable values; nested structures stay compact rather than a raw JSON dump. */
+function DetailValue({ v }: { v: unknown }) {
+  if (v === null || v === undefined || v === "") return <span className="text-fog-500">none</span>;
+  if (typeof v === "boolean") return <>{v ? "yes" : "no"}</>;
+  if (typeof v === "string" || typeof v === "number") return <>{String(v)}</>;
+  if (Array.isArray(v) && v.every((x) => typeof x !== "object" || x === null)) return <>{v.length ? v.join(", ") : "none"}</>;
+  return <code className="font-mono text-[11px] text-fog-400">{JSON.stringify(v)}</code>;
+}
+
 function EventRow({ e }: { e: AuditEvent }) {
   const [open, setOpen] = useState(false);
   const hasDetails = Object.keys(e.details).length > 0;
@@ -21,14 +30,19 @@ function EventRow({ e }: { e: AuditEvent }) {
       <p className="mt-1 text-[13.5px] leading-relaxed text-fog-300">{e.message}</p>
       {hasDetails && (
         <>
-          <button onClick={() => setOpen((o) => !o)} aria-expanded={open}
+          <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open} aria-controls={`audit-${e.id}`}
             className="mt-1 inline-flex items-center gap-1 text-xs text-fog-500 hover:text-fog-300">
             <CaretDown size={12} className={cx("transition", open && "rotate-180")} /> {open ? "Hide" : "Show"} recorded details
           </button>
           {open && (
-            <pre className="scrollbar-thin mt-2 max-h-72 overflow-auto rounded-xl bg-ink-950 p-3 font-mono text-[11px] leading-relaxed text-fog-400 ring-1 ring-white/[0.06]">
-              {JSON.stringify(e.details, null, 2)}
-            </pre>
+            <dl id={`audit-${e.id}`} className="scrollbar-thin mt-2 grid max-h-72 gap-1.5 overflow-auto rounded-xl bg-ink-950 p-3 text-[12px] ring-1 ring-white/[0.06]">
+              {Object.entries(e.details).map(([k, v]) => (
+                <div key={k} className="grid gap-0.5 sm:grid-cols-[180px_minmax(0,1fr)] sm:gap-3">
+                  <dt className="text-fog-500">{humanize(k)}</dt>
+                  <dd className="min-w-0 break-words text-fog-300"><DetailValue v={v} /></dd>
+                </div>
+              ))}
+            </dl>
           )}
         </>
       )}
